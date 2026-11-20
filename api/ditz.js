@@ -316,6 +316,28 @@ module.exports = async (req, res) => {
         await R('SET', 'catalog', JSON.stringify({ products, cats }));
         return send(200, { ok: true, count: products.length });
       }
+      case 'profile_set': {
+        const S = (v, n) => String(v == null ? '' : v).slice(0, n);
+        const un = S(b.username, 20), em = S(b.email, 80);
+        if (!/^[A-Za-z0-9_.]{3,20}$/.test(un)) throw new HttpErr(400, 'Username tidak valid');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) throw new HttpErr(400, 'Email tidak valid');
+        let ph = '';
+        if (b.photo) {
+          ph = String(b.photo);
+          if (ph.length > 40000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(ph)) throw new HttpErr(400, 'Foto tidak valid atau terlalu besar');
+        }
+        await R('HSET', 'prof', u, JSON.stringify({ u: un, p: ph, e: em }));
+        return send(200, { ok: true });
+      }
+      case 'profiles': {   // username + foto untuk semua; email hanya untuk admin; kata sandi tidak pernah disimpan di server
+        const ks = (Array.isArray(b.keys) ? b.keys : []).map(String).filter((k) => /^[a-z0-9_]{3,120}$/.test(k)).slice(0, 40);
+        const map = {};
+        if (ks.length) {
+          const r = (await R('HMGET', 'prof', ...ks)) || [];
+          ks.forEach((k, i) => { try { const o = JSON.parse(r[i]); if (o) { map[k] = { u: o.u, p: o.p || '' }; if (isAdm) map[k].e = o.e; } } catch (e) { /* kosong */ } });
+        }
+        return send(200, { map });
+      }
       default: throw new HttpErr(400, 'Aksi tidak dikenal');
     }
   } catch (e) {
