@@ -6,7 +6,7 @@
 //   ADMIN_EMAIL  (opsional)       = email admin, supaya admin bisa melihat saldo akun ditznesia
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
-const KEY = () => process.env.DITZ_APIKEY;
+const KEY = 'ae4674b4b4b9d22a91d8c2615a976ceb';
 const MARKUP = () => Number(process.env.DITZ_MARKUP || 0);
 const RURL = () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const RTOK = () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
