@@ -1,12 +1,12 @@
 // Vercel Serverless Function: /api/ditz
-// ENV yang dibutuhkan (Vercel > Settings > Environment Variables):
-//   DITZ_APIKEY                   = API key ditznesia (JANGAN ditulis di index.html)
-//   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN  (atau KV_REST_API_URL / KV_REST_API_TOKEN dari Vercel Marketplace > Upstash Redis)
-//   DITZ_MARKUP  (opsional)       = tambahan harga jual dalam persen, mis. 15
-//   ADMIN_EMAIL  (opsional)       = email admin, supaya admin bisa melihat saldo akun ditznesia
+// Simpan sebagai api/ditz.js (atau salin isi file ini).
+// DITZ_APIKEY sudah dipasang langsung sesuai key yang diberikan.
+// Catatan: jangan unggah file ini ke repository publik.
+// Redis tetap perlu dikonfigurasi melalui Environment Variables Vercel.
+
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
-const KEY = 'ae4674b4b4b9d22a91d8c2615a976ceb';
+const KEY = () => 'ae4674b4b4b9d22a91d8c2615a976ceb';
 const MARKUP = () => Number(process.env.DITZ_MARKUP || 0);
 const RURL = () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const RTOK = () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
@@ -70,9 +70,9 @@ module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const send = (c, o) => { res.statusCode = c; res.end(JSON.stringify(o)); };
   try {
-    if (!KEY()) throw new HttpErr(500, 'DITZ_APIKEY belum diisi di Vercel');
+    if (!KEY()) throw new HttpErr(500, 'DITZ_APIKEY belum diisi');
 
-    if (req.method === 'GET') { // data publik (baca saja), harga sudah termasuk markup
+    if (req.method === 'GET') {
       const q = req.query || {}, path = String(q.path || '');
       if (!READ.has(path)) throw new HttpErr(400, 'Endpoint tidak diizinkan');
       const p = {};
