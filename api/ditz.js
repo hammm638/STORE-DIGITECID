@@ -93,10 +93,15 @@ async function shotQr(id) {
   if (!pay || !isMidtrans(pay)) return { qr_err: 'Halaman pembayaran tidak tersedia' };
   if (!SHOT_KEY()) return { qr_err: 'SITESHOT_KEY belum diisi' };
   if ((await R('SET', 'qrlock:' + id, '1', 'NX', 'EX', 90)) !== 'OK') return { qr_pending: true };   // sedang dibuat oleh permintaan lain
-  const out = {};
+  let out = {};
+  const keys = await shotKeys();
+  const st = (await R('INCR', 'shotrr')) % keys.length;
+  for (let a = 0; a < Math.min(keys.length, 5); a++) {
+  out = {};
+  const KEYNOW = keys[(st + a) % keys.length];
   try {
     const p = new URLSearchParams({
-      url: pay, userkey: SHOT_KEY(), width: '420', height: '620', format: 'png', response_type: 'json',
+      url: pay, userkey: KEYNOW, width: '420', height: '620', format: 'png', response_type: 'json',
       delay_time: '9000', timeout: '50000', fresh_session: '1', javascript_code: QR_JS,
     });
     const r = await fetch('https://api.site-shot.com/?' + p.toString());
@@ -107,11 +112,19 @@ async function shotQr(id) {
     else if (j.error || !im) out.qr_err = 'Screenshot: ' + String(j.error || ('HTTP ' + r.status)).slice(0, 100);
     else { out.qr_link = im.startsWith('data:') ? im : 'data:image/png;base64,' + im; out.shot = true; }   // shot: gambar 420x620, dipotong di sisi halaman
   } catch (e) { out.qr_err = 'Gagal mengambil screenshot'; }
+  if (out.qr_link || !out.wait) break;   // lanjut ke key berikutnya hanya jika kena 429
+  }
   await R('SET', 'qrimg:' + id, JSON.stringify(out), 'EX', out.qr_link ? 3600 : (out.wait || 30));   // gagal: coba lagi setelah 30 detik (429: 2 menit)
   delete out.wait;
   await R('DEL', 'qrlock:' + id);
   return out;
 }
+
+async function shotKeys() {
+  try { const l = JSON.parse((await R('GET', 'shotkeys')) || '[]'); if (Array.isArray(l) && l.length) return l; } catch (e) { /* pakai bawaan */ }
+  return [SHOT_KEY()];
+}
+const ADMIN = () => process.env.ADMIN_EMAIL || 'ilhamkholif123123@gmail.com';
 
 function pick(b) {
   const server = String(b.server || ''), country = String(b.country || ''), produk = String(b.produk || ''), provider = b.provider === undefined || b.provider === null ? '' : String(b.provider);
@@ -164,6 +177,10 @@ module.exports = async (req, res) => {
     if (!/^[a-z0-9_]{3,120}$/.test(u) || !/^[a-f0-9]{32}$/.test(tok)) throw new HttpErr(401, 'Sesi tidak valid, login ulang');
     const h = crypto.createHash('sha256').update(tok).digest('hex');
     if ((await R('SETNX', 'tok:' + u, h)) !== 1 && (await R('GET', 'tok:' + u)) !== h) throw new HttpErr(403, 'Akun ini terikat ke perangkat lain');
+
+    const isAdm = u === kEmail(ADMIN());
+    const adminOnly = () => { if (!isAdm) throw new HttpErr(403, 'Khusus admin'); };
+    if (!isAdm && (await R('GET', 'ban:' + u))) throw new HttpErr(403, 'Akun kamu diblokir. Hubungi admin.');
 
     switch (b.action) {
       case 'balance': {
@@ -236,6 +253,68 @@ module.exports = async (req, res) => {
         const ids = (await R('LRANGE', 'deps:' + u, 0, 7)) || [];
         const list = await Promise.all(ids.map((id) => checkDep(u, id).catch(() => null)));
         return send(200, { items: list.filter(Boolean).map((d) => ({ id: d.id, nominal: d.nominal, status: d.status, created_at: d.created_at })), balance: await bal(u) });
+      }
+      case 'notifs': {
+        const l = (await R('LRANGE', 'notifs', 0, 4)) || [];
+        return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
+      }
+      case 'catalog': return send(200, JSON.parse((await R('GET', 'catalog')) || '{}'));
+      case 'buy_product': {   // harga diambil dari katalog di server, bukan dari browser
+        const c = JSON.parse((await R('GET', 'catalog')) || 'null');
+        const p = c && (c.products || []).find((x) => String(x.id) === String(b.id));
+        if (!p) throw new HttpErr(400, 'Produk belum tersinkron di server. Minta admin menyimpan ulang produk.');
+        const price = Math.round(Number(p.price));
+        if (!(price > 0)) throw new HttpErr(400, 'Harga produk belum diisi');
+        const left = await R('DECRBY', 'bal:' + u, price);
+        if (left < 0) { await credit(u, price); throw new HttpErr(400, 'Saldo tidak cukup'); }
+        return send(200, { balance: left, price, name: p.name });
+      }
+      case 'admin_balance': {
+        adminOnly();
+        const t = kEmail(b.email), n = Math.round(Number(b.amount));
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        if (!(n >= 1 && n <= 100000000)) throw new HttpErr(400, 'Nominal tidak valid');
+        if (b.mode === 'sub') {
+          const left = await R('DECRBY', 'bal:' + t, n);
+          if (left < 0) { await credit(t, n); throw new HttpErr(400, 'Saldo user kurang dari nominal'); }
+          return send(200, { balance: left });
+        }
+        return send(200, { balance: await credit(t, n) });
+      }
+      case 'admin_ban': {
+        adminOnly();
+        const t = kEmail(b.email);
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        if (t === u) throw new HttpErr(400, 'Tidak bisa memblokir akun sendiri');
+        if (b.ban) await R('SET', 'ban:' + t, '1'); else await R('DEL', 'ban:' + t);
+        return send(200, { ok: true });
+      }
+      case 'admin_notify': {
+        adminOnly();
+        const text = String(b.text || '').trim().slice(0, 200);
+        if (!text) throw new HttpErr(400, 'Isi notifikasi');
+        await R('LPUSH', 'notifs', JSON.stringify({ id: Date.now().toString(36), text, t: Date.now() }));
+        await R('LTRIM', 'notifs', 0, 19);
+        return send(200, { ok: true });
+      }
+      case 'admin_keys': {
+        adminOnly();
+        if (Array.isArray(b.keys)) {
+          const ks = [...new Set(b.keys.map((k) => String(k).trim()).filter(Boolean))];
+          if (ks.length > 30) throw new HttpErr(400, 'Maksimal 30 key');
+          if (ks.some((k) => !/^[\w\-]{8,80}$/.test(k))) throw new HttpErr(400, 'Format key tidak valid');
+          if (ks.length) await R('SET', 'shotkeys', JSON.stringify(ks)); else await R('DEL', 'shotkeys');
+        }
+        const ks = await shotKeys();
+        return send(200, { count: ks.length, masked: ks.map((k) => (k.length > 10 ? k.slice(0, 4) + '…' + k.slice(-4) : '••••')) });
+      }
+      case 'admin_catalog': {
+        adminOnly();
+        const S = (v, n) => String(v == null ? '' : v).slice(0, n);
+        const products = (Array.isArray(b.products) ? b.products : []).slice(0, 200).map((p) => ({ id: S(p.id, 40), name: S(p.name, 60), category: S(p.category, 20), price: Math.max(0, Math.round(Number(p.price) || 0)), desc: S(p.desc, 160) })).filter((p) => p.id && p.name);
+        const cats = (Array.isArray(b.cats) ? b.cats : []).slice(0, 30).map((c) => ({ id: S(c.id, 20), label: S(c.label, 24), icon: S(c.icon, 20), emoji: S(c.emoji, 4) })).filter((c) => c.id && c.label);
+        await R('SET', 'catalog', JSON.stringify({ products, cats }));
+        return send(200, { ok: true, count: products.length });
       }
       default: throw new HttpErr(400, 'Aksi tidak dikenal');
     }
