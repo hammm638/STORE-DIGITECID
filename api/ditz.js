@@ -1,3 +1,8 @@
+// Vercel Serverless Function: /api/ditz  (simpan sebagai api/ditz.js)
+// Semua kredensial dibaca dari Environment Variables Vercel (Project > Settings > Environment Variables):
+//   DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN   (opsional: DITZ_MARKUP, ADMIN_EMAIL)
+// Respons deposit membawa pay_url (halaman pembayaran QRIS Midtrans) ke browser. snap_token dan link penyedia lain tetap disembunyikan.
+
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
 const KEY = () => 'ae4674b4b4b9d22a91d8c2615a976ceb';
@@ -34,13 +39,17 @@ const bal = async (u) => Number(await R('GET', 'bal:' + u)) || 0;
 const credit = (u, n) => R('INCRBY', 'bal:' + u, Math.round(n));
 
 /* ---- Pembayaran: buang link penyedia, buat QR di server ---- */
-const HIDE = ['pay_url', 'snap_token', 'payment_url', 'redirect_url', 'token'];
+const HIDE = ['snap_token', 'payment_url', 'redirect_url', 'token'];
 const isUrl = (v) => typeof v === 'string' && /^(https?:)?\/\//i.test(v.trim());
-// Buang field link penyedia DAN nilai apa pun yang berupa URL (data: gambar tetap boleh)
+const isMidtrans = (v) => { try { return /(^|\.)midtrans\.com$/i.test(new URL(String(v).trim()).hostname); } catch (e) { return false; } };
+// Buang snap_token & URL penyedia; pay_url hanya lolos jika milik midtrans.com (halaman pembayaran QRIS)
 function clean(d) {
   const o = { ...d };
+  const pay = isMidtrans(o.pay_url) ? String(o.pay_url).trim() : '';
   HIDE.forEach((k) => delete o[k]);
+  delete o.pay_url;
   Object.keys(o).forEach((k) => { if (isUrl(o[k])) delete o[k]; });
+  if (pay) o.pay_url = pay;
   return o;
 }
 // Kalau penyedia memberi qr_link berupa URL: unduh di server, kirim ke browser sebagai data gambar
@@ -55,37 +64,6 @@ async function inlineQr(d) {
     } catch (e) { o.qr_link = null; }
   }
   return o;
-}
-
-async function makeQr(id, token) {
-  const cached = await R('GET', 'qr:' + id);
-  if (cached) return JSON.parse(cached);
-  const out = {};
-  try {
-    const r = await fetch('https://app.midtrans.com/snap/v2/transactions/' + encodeURIComponent(token) + '/charge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ payment_type: 'qris' }),
-    });
-    const t = await r.text();
-    let j = {}; try { j = JSON.parse(t); } catch (e) { /* bukan JSON */ }
-    let url = j.qr_code_url || j.gopay_qr_code_url || '';
-    if (!url && Array.isArray(j.actions)) { const a = j.actions.find((x) => /qr/i.test(x.name || '')); if (a) url = a.url; }
-    if (url) {
-      try {
-        const ir = await fetch(url);
-        if (ir.ok) {
-          const buf = Buffer.from(await ir.arrayBuffer());
-          out.qr_link = 'data:' + (ir.headers.get('content-type') || 'image/png').split(';')[0] + ';base64,' + buf.toString('base64');
-        }
-      } catch (e) { /* lanjut ke qr_string */ }
-    }
-    const qs = j.qr_string || j.qr_code_string || '';
-    if (!out.qr_link && qs) out.qr_string = qs;
-    if (!out.qr_link && !out.qr_string) out.qr_err = 'Gateway ' + r.status + ': ' + String(j.status_message || (j.error_messages && j.error_messages.join(', ')) || t).slice(0, 140);
-  } catch (e) { out.qr_err = 'Gagal menghubungi gateway pembayaran'; }
-  await R('SET', 'qr:' + id, JSON.stringify(out), 'EX', out.qr_link || out.qr_string ? 3600 : 30);   // gagal: coba lagi setelah 30 detik
-  return out;
 }
 
 function pick(b) {
@@ -183,19 +161,20 @@ module.exports = async (req, res) => {
         await R('SET', 'dep:' + d.id, u, 'EX', 2592000);
         await R('LPUSH', 'deps:' + u, d.id); await R('LTRIM', 'deps:' + u, 0, 19);
         const out = await inlineQr(d);
-        if (d.snap_token) {
-          await R('SET', 'snap:' + d.id, String(d.snap_token), 'EX', 2592000);
-          if (!out.qr_link) Object.assign(out, await makeQr(d.id, d.snap_token));
-        }
+        if (isUrl(d.pay_url)) await R('SET', 'pay:' + d.id, d.pay_url, 'EX', 2592000);   // disimpan di server, tidak dikirim ke browser
         return send(200, clean(out));
       }
       case 'deposit_status': {
         await ownDep(u, b.id);
         const d = await checkDep(u, b.id);
         const out = await inlineQr(d);
-        const snap = d.snap_token || (await R('GET', 'snap:' + b.id));
-        if (d.status === 'pending' && !out.qr_link && snap) Object.assign(out, await makeQr(b.id, snap));
         return send(200, { ...clean(out), balance: await bal(u) });
+      }
+      case 'deposit_pay': {   // dipanggil hanya jika QR tidak tersedia: beri link halaman bayar milik deposit ini
+        await ownDep(u, b.id);
+        const url = await R('GET', 'pay:' + b.id);
+        if (!url) throw new HttpErr(404, 'Halaman pembayaran tidak tersedia');
+        return send(200, { url });
       }
       case 'deposit_cancel': {
         await ownDep(u, b.id);
