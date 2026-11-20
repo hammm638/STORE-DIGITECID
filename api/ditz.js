@@ -1,15 +1,15 @@
 // Vercel Serverless Function: /api/ditz
 // Simpan sebagai api/ditz.js (atau salin isi file ini).
-// DITZ_APIKEY sudah dipasang langsung sesuai key yang diberikan.
-// Catatan: jangan unggah file ini ke repository publik.
-// Redis tetap perlu dikonfigurasi melalui Environment Variables Vercel.
+// DITZ_APIKEY dan kredensial Upstash sudah dipasang langsung sesuai data yang diberikan.
+// Tidak membutuhkan file .env maupun Environment Variables untuk DITZ dan Redis.
+// PENTING: jangan unggah file ini ke repository publik atau bagikan ke orang lain.
 
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
 const KEY = () => 'ae4674b4b4b9d22a91d8c2615a976ceb';
 const MARKUP = () => Number(process.env.DITZ_MARKUP || 0);
-const RURL = () => process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const RTOK = () => process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+const RURL = () => 'https://striking-macaque-209704.upstash.io';
+const RTOK = () => 'gQAAAAAAAzMoAAIgcDIzOWE4YzMwMzhmMWQ0MDczOTJmZjdkYWJhMGZkMjFhNA';
 const READ = new Set(['countries', 'services', 'operators']);
 const REFUND = new Set(['canceled', 'cancelled', 'expired', 'failed', 'refunded', 'timeout', 'batal', 'kadaluarsa']);
 const kEmail = (e) => String(e || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
