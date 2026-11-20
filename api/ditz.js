@@ -3,7 +3,7 @@
 const ALLOWED = new Set(['countries', 'services', 'operators']); // hanya endpoint baca data
 
 module.exports = async (req, res) => {
-  const key = process.env.DITZ_APIKEY;
+  const key = 'ae4674b4b4b9d22a91d8c2615a976ceb';
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   if (!key) { res.statusCode = 500; return res.end(JSON.stringify({ detail: 'DITZ_APIKEY belum diisi di Vercel' })); }
 
