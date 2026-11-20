@@ -1,6 +1,6 @@
 // Vercel Serverless Function: /api/ditz  (simpan sebagai api/ditz.js)
 // Semua kredensial dibaca dari Environment Variables Vercel (Project > Settings > Environment Variables):
-//   DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN   (opsional: DITZ_MARKUP, ADMIN_EMAIL)
+//   DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN, SITESHOT_KEY   (opsional: DITZ_MARKUP, ADMIN_EMAIL)
 // Respons deposit membawa pay_url (halaman pembayaran QRIS Midtrans) ke browser. snap_token dan link penyedia lain tetap disembunyikan.
 
 const crypto = require('crypto');
@@ -13,7 +13,6 @@ const READ = new Set(['countries', 'services', 'operators']);
 const REFUND = new Set(['canceled', 'cancelled', 'expired', 'failed', 'refunded', 'timeout', 'batal', 'kadaluarsa']);
 const kEmail = (e) => String(e || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
 const sell = (p) => Math.round(Number(p || 0) * (1 + MARKUP() / 100));
-
 
 class HttpErr extends Error { constructor(code, detail) { super(detail); this.code = code; } }
 
@@ -64,6 +63,70 @@ async function inlineQr(d) {
     } catch (e) { o.qr_link = null; }
   }
   return o;
+}
+
+
+/* ---- QR lewat screenshot (Site-Shot): buka halaman bayar di server, pilih QRIS, ambil gambar QR saja ---- */
+const SHOT_KEY = () => process.env.SITESHOT_KEY || '3BYBWIJ3SJ4VB5QIFQQRO7TJ2M';
+// Skrip ini dijalankan di dalam halaman pembayaran oleh Site-Shot (javascript_code)
+const QR_JS = `(function(){
+  var done=false,n=0,lastClick=0;
+  function T(e){return (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim()}
+  function qrEl(){
+    var c=[].slice.call(document.querySelectorAll('img,canvas')).filter(function(e){
+      var r=e.getBoundingClientRect();
+      return r.width>=120&&r.height>=120&&Math.abs(r.width-r.height)<10&&!/logo|icon/i.test((e.className||'')+(e.alt||'')+(e.src||''));
+    });
+    return c.sort(function(a,b){return b.getBoundingClientRect().width-a.getBoundingClientRect().width})[0];
+  }
+  function clickQris(){
+    var all=[].slice.call(document.querySelectorAll('a,button,li,div,span,p')).filter(function(e){var t=T(e);return t&&t.length<45&&/qris/i.test(t)});
+    all.sort(function(a,b){return T(a).length-T(b).length});
+    var el=all[0];if(!el)return;
+    var tg=el.closest('a,button,[role=button],li,[class*=item],[class*=list]')||el;
+    try{tg.click()}catch(e){}
+  }
+  function show(el){
+    var src=el.tagName==='CANVAS'?el.toDataURL('image/png'):(el.currentSrc||el.src);
+    var w=document.createElement('div');
+    w.style.cssText='position:fixed;left:0;top:0;width:100vw;height:100vh;background:#fff;z-index:2147483647;display:flex;align-items:center;justify-content:center';
+    var i=new Image();i.style.cssText='width:360px;height:360px;image-rendering:pixelated';
+    i.onload=function(){document.body.appendChild(w);var m=document.createElement('div');m.id='__qr_ok';m.style.display='none';document.body.appendChild(m)};
+    i.src=src;w.appendChild(i);
+  }
+  var t=setInterval(function(){
+    if(done||++n>60){clearInterval(t);return}
+    var q=qrEl();
+    if(q){done=true;clearInterval(t);try{show(q)}catch(e){}return}
+    if(Date.now()-lastClick>2500){lastClick=Date.now();clickQris()}
+  },400);
+})();`;
+
+async function shotQr(id) {
+  const cached = await R('GET', 'qrimg:' + id);
+  if (cached) return JSON.parse(cached);
+  const pay = await R('GET', 'pay:' + id);
+  if (!pay || !isMidtrans(pay)) return { qr_err: 'Halaman pembayaran tidak tersedia' };
+  if (!SHOT_KEY()) return { qr_err: 'SITESHOT_KEY belum diisi' };
+  if ((await R('SET', 'qrlock:' + id, '1', 'NX', 'EX', 90)) !== 'OK') return { qr_pending: true };   // sedang dibuat oleh permintaan lain
+  const out = {};
+  try {
+    const p = new URLSearchParams({
+      url: pay, userkey: SHOT_KEY(), width: '420', height: '420', format: 'png', response_type: 'json',
+      delay_time: '9000', timeout: '50000', fresh_session: '1', source_code: '1', javascript_code: QR_JS,
+    });
+    const r = await fetch('https://api.site-shot.com/?' + p.toString());
+    const t = await r.text();
+    let j = {}; try { j = JSON.parse(t); } catch (e) { /* bukan JSON */ }
+    const im = String(j.image || '');
+    const hasSource = Object.keys(j).some((k) => /source/i.test(k));
+    if (j.error || !im) out.qr_err = 'Screenshot: ' + String(j.error || ('HTTP ' + r.status)).slice(0, 100);
+    else if (hasSource && t.indexOf('__qr_ok') < 0) out.qr_err = 'QR belum muncul di halaman pembayaran';
+    else out.qr_link = im.startsWith('data:') ? im : 'data:image/png;base64,' + im;
+  } catch (e) { out.qr_err = 'Gagal mengambil screenshot'; }
+  await R('SET', 'qrimg:' + id, JSON.stringify(out), 'EX', out.qr_link ? 3600 : 30);   // gagal: boleh coba lagi setelah 30 detik
+  await R('DEL', 'qrlock:' + id);
+  return out;
 }
 
 function pick(b) {
@@ -169,6 +232,10 @@ module.exports = async (req, res) => {
         const d = await checkDep(u, b.id);
         const out = await inlineQr(d);
         return send(200, { ...clean(out), balance: await bal(u) });
+      }
+      case 'deposit_qr': {   // gambar QR dibuat lewat screenshot; hasilnya di-cache
+        await ownDep(u, b.id);
+        return send(200, await shotQr(b.id));
       }
       case 'deposit_pay': {   // dipanggil hanya jika QR tidak tersedia: beri link halaman bayar milik deposit ini
         await ownDep(u, b.id);
