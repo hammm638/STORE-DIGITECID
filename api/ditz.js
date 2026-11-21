@@ -155,6 +155,10 @@ async function userStat(u, kind, amt) {   // kind: 'o' = order, 'dp' = deposit b
     await R('HINCRBY', k, kind, 1);
     await R('HINCRBY', k, kind + 's', Math.round(Number(amt) || 0));
     await R('EXPIRE', k, 7776000);
+    const g = 'gst:' + dayWIB(Date.now());
+    await R('HINCRBY', g, kind, 1);
+    await R('HINCRBY', g, kind + 's', Math.round(Number(amt) || 0));
+    await R('EXPIRE', g, 7776000);
   } catch (e) { /* statistik tidak boleh menggagalkan transaksi */ }
 }
 
@@ -242,6 +246,7 @@ module.exports = async (req, res) => {
           d = await ditz('order', p);
         } catch (e) { await credit(u, price); throw e; }
         await R('SET', 'ord:' + d.id, JSON.stringify({ u, price }), 'EX', 604800);
+        await R('LPUSH', 'ords:' + u, d.id); await R('LTRIM', 'ords:' + u, 0, 9);
         await userStat(u, 'o', price);
         await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'));
         return send(200, { ...d, price_sell: price, balance: await bal(u) });
@@ -504,6 +509,29 @@ module.exports = async (req, res) => {
         for (let i = 0; i < ks.length; i += 20) await Promise.all(ks.slice(i, i + 20).map((k) => (b.ban ? R('SET', 'ban:' + k, '1') : R('DEL', 'ban:' + k))));
         await auditLog((b.ban ? 'Ban massal ' : 'Unban massal ') + ks.length + ' user');
         return send(200, { count: ks.length });
+      }
+      case 'global_stats': {   // grafik order & deposit seluruh toko (hanya jumlah, tanpa data pribadi)
+        const n = 14;
+        const days = await Promise.all(Array.from({ length: n }, (_, i) => dayWIB(Date.now() - (n - 1 - i) * 86400000)).map(async (dk) => {
+          const h = (await R('HGETALL', 'gst:' + dk)) || [], o = { t: dk, o: 0, dp: 0 };
+          for (let j = 0; j + 1 < h.length; j += 2) if (h[j] === 'o' || h[j] === 'dp') o[h[j]] = Number(h[j + 1]) || 0;
+          return o;
+        }));
+        return send(200, { days });
+      }
+      case 'sweep': {   // refund otomatis untuk order yang batal/gagal/kedaluwarsa walau user tidak membuka kartu ordernya
+        const ids = (await R('LRANGE', 'ords:' + u, 0, 4)) || [];
+        let refunded = 0;
+        await Promise.all(ids.map(async (id) => {
+          try {
+            if (await R('GET', 'ref:' + id)) return;
+            const rec = JSON.parse((await R('GET', 'ord:' + id)) || 'null');
+            if (!rec || rec.u !== u) return;
+            const d = await ditz('status', { id });
+            if (REFUND.has(String(d.status).toLowerCase())) { if ((await R('SETNX', 'ref:' + id, '1')) === 1) { await credit(u, rec.price); refunded++; } }
+          } catch (e) { /* lewati, dicek lagi nanti */ }
+        }));
+        return send(200, { refunded, balance: await bal(u) });
       }
       case 'my_stats': {   // grafik order & deposit milik user sendiri (14 hari, WIB)
         const n = 14;
