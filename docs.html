@@ -77,8 +77,21 @@ Authorization: Bearer dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code
 <li>Jika OTP tidak datang, panggil <code>POST /orders/{id}/cancel</code>. Order yang dibatalkan atau kedaluwarsa dikembalikan saldonya otomatis, hanya sekali.</li></ol>
 <div class="note">Setelah OTP masuk, order dianggap selesai dan saldo tidak dikembalikan. Nilai <code>status</code> diteruskan dari penyedia (contoh: <code>waiting</code>, <code>canceled</code>, <code>expired</code>). Anggap order sukses kalau <code>otp</code> tidak <code>null</code>.</div>
 <h3>Isi saldo</h3>
-<ol><li><code>POST /deposits</code> dengan <code>nominal</code>. Tampilkan gambar di <code>qr_link</code> (data URI) atau buka <code>pay_url</code> jika ada.</li>
-<li>Polling <code>GET /deposits/{id}</code> sampai <code>status</code> menjadi <code>berhasil</code>. Saldo bertambah otomatis satu kali.</li></ol></div></section>
+<ol><li><code>POST /deposits</code> dengan <code>nominal</code>. Jika <code>qr_link</code> berisi gambar (data URI), tampilkan.</li>
+<li>Jika <code>qr_link</code> adalah <code>null</code>, panggil <code>GET /deposits/{id}/qr</code>. Server membuka halaman bayar QRIS lalu mengambil screenshot-nya. Selama masih dibuat, respons berstatus <code>202</code> dengan <code>qr_pending: true</code>; ulangi tiap 5 detik sampai <code>qr_link</code> terisi. Proses biasanya memakan 10 sampai 60 detik.</li>
+<li>Jika <code>qr_link</code> tetap <code>null</code> dan <code>qr_error</code> terisi, buka <code>pay_url</code> di browser untuk membayar lewat halaman pembayaran.</li>
+<li>Polling <code>GET /deposits/{id}</code> sampai <code>status</code> menjadi <code>berhasil</code>. Saldo bertambah otomatis satu kali.</li></ol>
+<div class="note">Gambar dari <code>/qr</code> adalah screenshot halaman bayar berukuran <code>width</code> x <code>height</code> (420 x 620 piksel), bukan QR polos. Bagian yang berisi QR dimulai dari <code>crop.top</code> sepanjang <code>crop.height</code> piksel. Potong gambarnya sebelum ditampilkan, seperti contoh di bawah. Setelah deposit berhasil, batal, atau kedaluwarsa, endpoint ini membalas <code>409 deposit_closed</code>.</div>
+<h3>Menampilkan QR dari screenshot</h3>
+<p class="mut">HTML: potong dengan CSS. Angka 79.29% berasal dari crop.top / (height - crop.height) = 222 / 280.</p>
+<pre><code>&lt;img src="DATA_URI_DARI_qr_link" width="300"
+     style="aspect-ratio:420/340;object-fit:cover;object-position:50% 79.29%"&gt;</code></pre>
+<p class="mut">Python: potong dengan Pillow.</p>
+<pre><code>import base64, io
+from PIL import Image
+
+raw = base64.b64decode(qr_link.split(',', 1)[1])
+Image.open(io.BytesIO(raw)).crop((0, 222, 420, 562)).save('qr.png')</code></pre></div></section>
 
 <section id="error"><h2>Kode error</h2>
 <div class="card"><table><thead><tr><th>HTTP</th><th>code</th><th>Arti</th></tr></thead><tbody>
@@ -89,6 +102,7 @@ Authorization: Bearer dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code
 <tr><td>403</td><td>account_banned</td><td>Akun diblokir.</td></tr>
 <tr><td>404</td><td>not_found, service_unavailable</td><td>Endpoint, order, atau deposit tidak ada. Layanan tidak tersedia.</td></tr>
 <tr><td>409</td><td>request_in_progress</td><td>Idempotency-Key yang sama masih diproses.</td></tr>
+<tr><td>409</td><td>deposit_closed</td><td>Deposit sudah berhasil, batal, atau kedaluwarsa, jadi QR tidak dibuat. Respons memuat <code>status</code> dan <code>balance</code>.</td></tr>
 <tr><td>429</td><td>rate_limited</td><td>Terlalu banyak permintaan. Tunggu sesuai <code>retry_after</code>.</td></tr>
 <tr><td>5xx</td><td>upstream_unreachable, upstream_invalid, database_error</td><td>Gangguan di sisi server atau penyedia. Aman diulang; kalau order gagal dibuat, saldo dikembalikan otomatis.</td></tr>
 </tbody></table></div></section>
@@ -114,9 +128,10 @@ var EP=[
 ['GET','/orders','20 order terakhir yang dibuat lewat API.',[],null,{orders:[{id:'ORD12345678',service:'WhatsApp',country:'ID',server:'1',price:3200,created_at:'2026-11-21T10:00:00.000Z'}]}],
 ['GET','/orders/ORD12345678','Status order dan OTP. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.',[['id','path','ya','ID order']],null,{id:'ORD12345678',number:'6281234567890',status:'waiting',otp:null,price:3200,refunded:false,balance:21800}],
 ['POST','/orders/ORD12345678/cancel','Batalkan order dan kembalikan saldo (sekali).',[['id','path','ya','ID order']],{},{id:'ORD12345678',status:'canceled',refunded:true,balance:25000}],
-['POST','/deposits','Buat QRIS deposit. Nominal Rp 1.000 sampai Rp 5.000.000.',[['nominal','body','ya','Angka rupiah']],{nominal:10000},{id:'DEP123',nominal:10000,status:'pending',qr_link:'data:image/png;base64,...',pay_url:'https://...'},0,'Idempotency-Key'],
+['POST','/deposits','Buat QRIS deposit. Nominal Rp 1.000 sampai Rp 5.000.000. Jika qr_link null, ambil gambar QR lewat GET /deposits/{id}/qr.',[['nominal','body','ya','Angka rupiah']],{nominal:10000},{id:'DEP123',nominal:10000,status:'pending',qr_link:'data:image/png;base64,...',pay_url:'https://...'},0,'Idempotency-Key'],
 ['GET','/deposits','Riwayat deposit terakhir dan saldo.',[],null,{deposits:[{id:'DEP123',nominal:10000,status:'berhasil',created_at:'2026-11-21 10:00:00'}],balance:35000}],
 ['GET','/deposits/DEP123','Status deposit. Saldo otomatis bertambah sekali saat status berhasil.',[['id','path','ya','ID deposit']],null,{id:'DEP123',nominal:10000,status:'berhasil',total_diterima:10000,balance:35000}],
+['GET','/deposits/DEP123/qr','Ambil gambar QR deposit lewat screenshot halaman bayar QRIS. Hasil disimpan 1 jam. Saat masih dibuat, server membalas 202 dengan qr_pending true: ulangi tiap 5 detik. Jika gagal, qr_link null, qr_error berisi alasan, dan pay_url (halaman bayar) dikirim sebagai cadangan.',[['id','path','ya','ID deposit yang masih menunggu pembayaran']],null,{id:'DEP123',status:'pending',qr_link:'data:image/png;base64,...',source:'screenshot',width:420,height:620,crop:{top:222,height:340},balance:25000}],
 ['POST','/deposits/DEP123/cancel','Batalkan deposit yang belum dibayar.',[['id','path','ya','ID deposit']],{},{id:'DEP123',status:'batal',balance:25000}]
 ];
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
