@@ -156,6 +156,13 @@ async function checkDep(u, id) {
   return d;
 }
 
+const auditLog = async (text) => {
+  const t = String(text || '').trim().slice(0, 200);
+  if (!t) throw new HttpErr(400, 'Isi catatan');
+  await R('LPUSH', 'audit', JSON.stringify({ text: t, t: Date.now() }));
+  await R('LTRIM', 'audit', 0, 199);
+};
+
 module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const send = (c, o) => { res.statusCode = c; res.end(JSON.stringify(o)); };
@@ -375,6 +382,117 @@ module.exports = async (req, res) => {
           ks.forEach((k, i) => { try { const o = JSON.parse(r[i]); if (o) { map[k] = { u: o.u, p: o.p || '' }; if (isAdm) map[k].e = o.e; } } catch (e) { /* kosong */ } });
         }
         return send(200, { map });
+      }
+      case 'admin_users': {   // semua user: username, email, saldo, waktu join, status ban, perangkat terikat
+        adminOnly();
+        const all = (await R('HGETALL', 'prof')) || [];
+        const rows = [];
+        for (let i = 0; i + 1 < all.length; i += 2) {
+          try { const o = JSON.parse(all[i + 1]); if (o && o.u) rows.push({ k: all[i], u: String(o.u), e: String(o.e || ''), s: Number(o.s) || 0 }); } catch (e) { /* lewati */ }
+        }
+        rows.sort((a, b) => b.s - a.s);
+        const list = rows.slice(0, 1000);
+        if (list.length) {
+          const ks = list.map((x) => x.k);
+          const [bals, bans, toks, notes, tags] = await Promise.all([
+            R('MGET', ...ks.map((k) => 'bal:' + k)), R('MGET', ...ks.map((k) => 'ban:' + k)), R('MGET', ...ks.map((k) => 'tok:' + k)), R('HMGET', 'unote', ...ks), R('HMGET', 'utag', ...ks)]);
+          list.forEach((x, i) => { x.b = Number(bals[i]) || 0; x.x = bans[i] ? 1 : 0; x.d = toks[i] ? 1 : 0; x.n = (notes && notes[i]) || ''; x.g = (tags && tags[i]) || ''; });
+        }
+        return send(200, { list, total: rows.length });
+      }
+      case 'admin_user_detail': {
+        adminOnly();
+        const t = kEmail(b.email);
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        const ids = (await R('LRANGE', 'deps:' + t, 0, 4)) || [];
+        const last = await Promise.all(ids.map((id) => ditz('deposit/status', { id }).then((x) => ({ id, n: x.nominal, s: x.status, c: x.created_at })).catch(() => ({ id, s: '?' }))));
+        return send(200, { deposits: Number(await R('LLEN', 'deps:' + t)) || 0, apikey: !!(await R('GET', 'apiu:' + t)), last });
+      }
+      case 'admin_reset_device': {   // lepas ikatan perangkat: user bisa login dari perangkat baru
+        adminOnly();
+        const t = kEmail(b.email);
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        await R('DEL', 'tok:' + t);
+        return send(200, { ok: true });
+      }
+      case 'admin_notify_clear': {
+        adminOnly();
+        await R('DEL', 'notifs');
+        return send(200, { ok: true });
+      }
+      case 'admin_system': {   // status server, saldo penyedia, latensi database
+        adminOnly();
+        const t0 = Date.now(); await R('PING'); const ms = Date.now() - t0;
+        let provider = null, perr = '';
+        try { provider = (await ditz('profile')).balance; } catch (e) { perr = e.message; }
+        const ks = await shotKeys();
+        return send(200, { redis_ms: ms, users: Number(await R('HLEN', 'prof')) || 0, provider, provider_error: perr, markup: MARKUP(), shotkeys: ks.length, time: Date.now() });
+      }
+      case 'admin_audit': {
+        adminOnly();
+        const l = (await R('LRANGE', 'audit', 0, 99)) || [];
+        return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
+      }
+      case 'admin_audit_add': {
+        adminOnly();
+        await auditLog(b.text);
+        return send(200, { ok: true });
+      }
+      case 'admin_set_balance': {   // set saldo ke nominal tepat
+        adminOnly();
+        const t = kEmail(b.email), n = Math.round(Number(b.amount));
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        if (!(n >= 0 && n <= 100000000)) throw new HttpErr(400, 'Nominal tidak valid');
+        const cur = await bal(t);
+        if (n !== cur) await R('INCRBY', 'bal:' + t, n - cur);
+        await auditLog('Set saldo ' + t + ': ' + cur + ' menjadi ' + n + (b.note ? ' (' + String(b.note).slice(0, 60) + ')' : ''));
+        return send(200, { balance: n, before: cur });
+      }
+      case 'admin_bulk_balance': {   // bonus saldo ke banyak user sekaligus
+        adminOnly();
+        const n = Math.round(Number(b.amount));
+        const ks = [...new Set((Array.isArray(b.keys) ? b.keys : []).map(String).filter((k) => /^[a-z0-9_]{3,120}$/.test(k)))].slice(0, 300);
+        if (!(n >= 1 && n <= 10000000)) throw new HttpErr(400, 'Nominal tidak valid (1 sampai 10.000.000)');
+        if (!ks.length) throw new HttpErr(400, 'Tidak ada user yang dipilih');
+        for (let i = 0; i < ks.length; i += 20) await Promise.all(ks.slice(i, i + 20).map((k) => credit(k, n)));
+        await auditLog('Bonus saldo massal Rp ' + n.toLocaleString('id-ID') + ' ke ' + ks.length + ' user' + (b.note ? ' (' + String(b.note).slice(0, 60) + ')' : ''));
+        return send(200, { count: ks.length });
+      }
+      case 'admin_note_set': {   // catatan + label per user
+        adminOnly();
+        const t = kEmail(b.email), note = String(b.note || '').trim().slice(0, 120), tag = ['VIP', 'Reseller', 'Curiga'].includes(b.tag) ? b.tag : '';
+        if (!/^[a-z0-9_]{3,120}$/.test(t)) throw new HttpErr(400, 'Email user tidak valid');
+        if (note) await R('HSET', 'unote', t, note); else await R('HDEL', 'unote', t);
+        if (tag) await R('HSET', 'utag', t, tag); else await R('HDEL', 'utag', t);
+        return send(200, { ok: true });
+      }
+      case 'admin_bulk_ban': {
+        adminOnly();
+        const ks = [...new Set((Array.isArray(b.keys) ? b.keys : []).map(String).filter((k) => /^[a-z0-9_]{3,120}$/.test(k) && k !== u))].slice(0, 200);
+        if (!ks.length) throw new HttpErr(400, 'Tidak ada user yang dipilih');
+        for (let i = 0; i < ks.length; i += 20) await Promise.all(ks.slice(i, i + 20).map((k) => (b.ban ? R('SET', 'ban:' + k, '1') : R('DEL', 'ban:' + k))));
+        await auditLog((b.ban ? 'Ban massal ' : 'Unban massal ') + ks.length + ' user');
+        return send(200, { count: ks.length });
+      }
+      case 'admin_events': {   // rekap order/deposit per hari (WIB), dihimpun dari feed dan disimpan permanen
+        adminOnly();
+        const day = (t) => new Date(Number(t) + 25200000).toISOString().slice(0, 10);
+        const items = ((await R('LRANGE', 'feed', 0, 49)) || []).map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter((x) => x && x.id && x.t);
+        const fresh = await Promise.all(items.map((x) => R('SET', 'evs:' + x.id, '1', 'NX', 'EX', 604800)));
+        for (let i = 0; i < items.length; i++) {
+          if (fresh[i] !== 'OK') continue;
+          const x = items[i], k = 'evd:' + day(x.t), m = String(x.x || '').match(/Rp ([\d.,]+)/);
+          await R('HINCRBY', k, String(x.k || 'lain').slice(0, 12), 1);
+          if (x.k === 'deposit' && m) await R('HINCRBY', k, 'sum', parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0);
+          await R('EXPIRE', k, 7776000);
+        }
+        const n = Math.min(30, Math.max(7, Number(b.days) || 30));
+        const days = await Promise.all(Array.from({ length: n }, (_, i) => day(Date.now() - (n - 1 - i) * 86400000)).map(async (dk) => {
+          const h = (await R('HGETALL', 'evd:' + dk)) || [], o = { d: dk };
+          for (let j = 0; j + 1 < h.length; j += 2) o[h[j]] = Number(h[j + 1]) || 0;
+          return o;
+        }));
+        return send(200, { days });
       }
       default: throw new HttpErr(400, 'Aksi tidak dikenal');
     }
