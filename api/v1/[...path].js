@@ -1,5 +1,6 @@
 /* DIGITECID API v1 - endpoint publik. Auth: header X-API-Key. Saldo = saldo akun situs (Redis bal:<user>), bukan saldo ditznesia.
-   Env Vercel: DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN (opsional: DITZ_MARKUP) */
+   Env Vercel: DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN (opsional: DITZ_MARKUP, SITESHOT_KEY)
+   QR deposit lewat screenshot (GET /deposits/{id}/qr) memakai key Site-Shot yang sama dengan situs: daftar 'shotkeys' di Redis, atau SITESHOT_KEY. */
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
 const E = (k) => process.env[k] || '';
@@ -135,6 +136,117 @@ async function inlineQr(d) {
   }
 
   return o;
+}
+
+/* ---- QR lewat screenshot (Site-Shot): sama seperti di situs, hasilnya berbagi cache qrimg:<id> ---- */
+const SHOT_W = 420, SHOT_H = 620, SHOT_TOP = 222, SHOT_SHOW = 340;   // ukuran gambar dan bagian yang berisi QR (px)
+// Skrip ini dijalankan di dalam halaman pembayaran oleh Site-Shot (javascript_code)
+const QR_JS = `(function(){
+  var n=0,lastClick=0;
+  function T(e){return (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim()}
+  function hasQr(){
+    return [].slice.call(document.querySelectorAll('img,canvas,svg')).some(function(e){
+      var r=e.getBoundingClientRect();
+      return r.width>=120&&r.height>=120&&Math.abs(r.width-r.height)<10&&!/logo|icon/i.test((e.getAttribute('class')||'')+(e.getAttribute('alt')||'')+(e.getAttribute('src')||''));
+    });
+  }
+  function clickQris(){
+    var all=[].slice.call(document.querySelectorAll('a,button,li,div,span,p')).filter(function(e){var t=T(e);return t&&t.length<45&&/qris/i.test(t)});
+    all.sort(function(a,b){return T(a).length-T(b).length});
+    var el=all[0];if(!el)return;
+    var tg=el.closest('a,button,[role=button],li,[class*=item],[class*=list]')||el;
+    try{tg.click()}catch(e){}
+  }
+  var t=setInterval(function(){
+    if(++n>20||hasQr()){clearInterval(t);return}
+    if(Date.now()-lastClick>2500){lastClick=Date.now();clickQris()}
+  },400);
+})();`;
+
+async function shotKeys() {
+  try {
+    const l = JSON.parse((await R('GET', 'shotkeys')) || '[]');
+    if (Array.isArray(l) && l.length) return l.map(String);
+  } catch (e) {
+    /* pakai key bawaan dari env */
+  }
+  const k = E('SITESHOT_KEY');
+  return k ? [k] : [];
+}
+
+async function shotQr(id) {
+  const cached = await R('GET', 'qrimg:' + id);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* cache rusak, buat ulang */ }
+  }
+
+  const pay = await R('GET', 'pay:' + id);
+  if (!pay || !isMidtrans(pay)) return { qr_err: 'Halaman pembayaran tidak tersedia' };
+
+  const keys = await shotKeys();
+  if (!keys.length) return { qr_err: 'Key Site-Shot belum diisi di server' };
+
+  // sedang dibuat oleh permintaan lain
+  if ((await R('SET', 'qrlock:' + id, '1', 'NX', 'EX', 90)) !== 'OK') return { qr_pending: true };
+
+  let out = {};
+
+  try {
+    const st = (await R('INCR', 'shotrr')) % keys.length;
+
+    for (let a = 0; a < Math.min(keys.length, 5); a++) {
+      out = {};
+      const key = keys[(st + a) % keys.length];
+
+      try {
+        const p = new URLSearchParams({
+          url: pay,
+          userkey: key,
+          width: String(SHOT_W),
+          height: String(SHOT_H),
+          format: 'png',
+          response_type: 'json',
+          delay_time: '9000',
+          timeout: '50000',
+          fresh_session: '1',
+          javascript_code: QR_JS
+        });
+
+        const r = await fetch('https://api.site-shot.com/?' + p.toString());
+        const t = await r.text();
+
+        let j = {};
+        try { j = JSON.parse(t); } catch (e) { /* bukan JSON */ }
+
+        const im = String(j.image || '');
+
+        if (r.status === 429) {
+          out.qr_err = 'Screenshot ditolak (429): kuota atau batas permintaan Site-Shot tercapai. ' +
+            String(j.error || t || '').replace(/\s+/g, ' ').slice(0, 100);
+          out.wait = 120;
+        } else if (j.error || !im) {
+          out.qr_err = 'Screenshot: ' + String(j.error || ('HTTP ' + r.status)).slice(0, 100);
+        } else {
+          out.qr_link = im.startsWith('data:') ? im : 'data:image/png;base64,' + im;
+          out.shot = true;
+        }
+      } catch (e) {
+        out.qr_err = 'Gagal mengambil screenshot';
+      }
+
+      // lanjut ke key berikutnya hanya jika kena 429
+      if (out.qr_link || !out.wait) break;
+    }
+
+    // berhasil: simpan 1 jam. gagal: coba lagi setelah 30 detik (429: 2 menit)
+    const ttl = out.qr_link ? 3600 : (out.wait || 30);
+    delete out.wait;
+    await R('SET', 'qrimg:' + id, JSON.stringify(out), 'EX', ttl);
+  } finally {
+    await R('DEL', 'qrlock:' + id);
+  }
+
+  return out;
 }
 
 /* ---- util ---- */
@@ -708,6 +820,40 @@ module.exports = async (req, res) => {
           ...clean(await inlineQr(d)),
           balance: await bal(u)
         });
+      }
+
+      if (b && c === 'qr' && m === 'GET') {
+        await ownDep(u, b);
+        const d = await checkDep(u, b);
+        const st = String(d.status || '').toLowerCase();
+
+        if (['berhasil', 'batal', 'kadaluarsa'].includes(st)) {
+          throw new HttpErr(
+            409,
+            'deposit_closed',
+            'Deposit sudah tidak menunggu pembayaran',
+            { status: st, balance: await bal(u) }
+          );
+        }
+
+        const r = await shotQr(b);
+        const out = { id: b, status: st || null, qr_link: r.qr_link || null };
+
+        if (r.qr_link) {
+          out.source = 'screenshot';
+          out.width = SHOT_W;
+          out.height = SHOT_H;
+          out.crop = { top: SHOT_TOP, height: SHOT_SHOW };
+        } else {
+          if (r.qr_pending) out.qr_pending = true;
+          if (r.qr_err) out.qr_error = String(r.qr_err);
+
+          const pay = await R('GET', 'pay:' + b);
+          if (isMidtrans(pay)) out.pay_url = String(pay).trim();
+        }
+
+        out.balance = await bal(u);
+        return send(r.qr_pending ? 202 : 200, out);
       }
 
       if (b && c === 'cancel' && m === 'POST') {
