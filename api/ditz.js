@@ -179,6 +179,19 @@ async function lightProfiles() {
   return (await R('HGETALL', 'pidx')) || [];
 }
 
+/* ---- Rekap feed ke hitungan harian (evd:), dipakai grafik admin dan grafik toko ---- */
+async function ingestFeed() {
+  const items = ((await R('LRANGE', 'feed', 0, 49)) || []).map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter((x) => x && x.id && x.t);
+  const fresh = await Promise.all(items.map((x) => R('SET', 'evs:' + x.id, '1', 'NX', 'EX', 604800)));
+  for (let i = 0; i < items.length; i++) {
+    if (fresh[i] !== 'OK') continue;
+    const x = items[i], k = 'evd:' + dayWIB(x.t), m = String(x.x || '').match(/Rp ([\d.,]+)/);
+    await R('HINCRBY', k, String(x.k || 'lain').slice(0, 12), 1);
+    if (x.k === 'deposit' && m) await R('HINCRBY', k, 'sum', parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0);
+    await R('EXPIRE', k, 7776000);
+  }
+}
+
 async function refundOnce(u, id, price) { if ((await R('SETNX', 'ref:' + id, '1')) === 1) await credit(u, price); }
 async function ownDep(u, id) {
   if (!/^[\w\-]{3,64}$/.test(String(id || '')) || (await R('GET', 'dep:' + id)) !== u) throw new HttpErr(404, 'Deposit tidak ditemukan');
@@ -552,10 +565,13 @@ module.exports = async (req, res) => {
       }
       case 'global_stats': {   // grafik order & deposit seluruh toko (hanya jumlah, tanpa data pribadi)
         const n = 14;
+        try { await ingestFeed(); } catch (e) { /* tetap tampilkan data yang ada */ }
         const days = await Promise.all(Array.from({ length: n }, (_, i) => dayWIB(Date.now() - (n - 1 - i) * 86400000)).map(async (dk) => {
-          const h = (await R('HGETALL', 'gst:' + dk)) || [], o = { t: dk, o: 0, dp: 0 };
-          for (let j = 0; j + 1 < h.length; j += 2) if (h[j] === 'o' || h[j] === 'dp') o[h[j]] = Number(h[j + 1]) || 0;
-          return o;
+          const [g, e] = await Promise.all([R('HGETALL', 'gst:' + dk), R('HGETALL', 'evd:' + dk)]);
+          const G = {}, E = {};
+          for (let j = 0; g && j + 1 < g.length; j += 2) G[g[j]] = Number(g[j + 1]) || 0;
+          for (let j = 0; e && j + 1 < e.length; j += 2) E[e[j]] = Number(e[j + 1]) || 0;
+          return { t: dk, o: Math.max(G.o || 0, E.order || 0), dp: Math.max(G.dp || 0, E.deposit || 0) };
         }));
         return send(200, { days });
       }
@@ -584,16 +600,8 @@ module.exports = async (req, res) => {
       }
       case 'admin_events': {   // rekap order/deposit per hari (WIB), dihimpun dari feed dan disimpan permanen
         adminOnly();
-        const day = (t) => new Date(Number(t) + 25200000).toISOString().slice(0, 10);
-        const items = ((await R('LRANGE', 'feed', 0, 49)) || []).map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter((x) => x && x.id && x.t);
-        const fresh = await Promise.all(items.map((x) => R('SET', 'evs:' + x.id, '1', 'NX', 'EX', 604800)));
-        for (let i = 0; i < items.length; i++) {
-          if (fresh[i] !== 'OK') continue;
-          const x = items[i], k = 'evd:' + day(x.t), m = String(x.x || '').match(/Rp ([\d.,]+)/);
-          await R('HINCRBY', k, String(x.k || 'lain').slice(0, 12), 1);
-          if (x.k === 'deposit' && m) await R('HINCRBY', k, 'sum', parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0);
-          await R('EXPIRE', k, 7776000);
-        }
+        const day = dayWIB;
+        await ingestFeed();
         const n = Math.min(30, Math.max(7, Number(b.days) || 30));
         const days = await Promise.all(Array.from({ length: n }, (_, i) => day(Date.now() - (n - 1 - i) * 86400000)).map(async (dk) => {
           const h = (await R('HGETALL', 'evd:' + dk)) || [], o = { d: dk };
