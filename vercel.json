@@ -4,6 +4,6 @@
     { "source": "/index.html", "destination": "/granted/index.html" }
   ],
   "crons": [
-    { "path": "/api/ditz?cron=1", "schedule": "*/5 * * * *" }
+    { "path": "/api/ditz?cron=1", "schedule": "0 0 * * *" }
   ]
 }
