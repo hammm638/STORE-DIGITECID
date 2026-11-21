@@ -4,7 +4,7 @@ const KEY = () => 'ae4674b4b4b9d22a91d8c2615a976ceb';
 const MARKUP = () => Number(process.env.DITZ_MARKUP || 0);
 const RURL = () => 'https://striking-macaque-209704.upstash.io';
 const RTOK = () => 'gQAAAAAAAzMoAAIgcDIzOWE4YzMwMzhmMWQ0MDczOTJmZjdkYWJhMGZkMjFhNA';
-const READ = new Set(['countries', 'services', 'operators']);
+const READ = new Set(['countries', 'services', 'operators', 'otpwa-services', 'shopee-countries', 'tg-countries']);
 const REFUND = new Set(['canceled', 'cancelled', 'expired', 'failed', 'refunded', 'timeout', 'batal', 'kadaluarsa']);
 const kEmail = (e) => String(e || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
 const mask = (u) => { const s = String(u || ''); return s.slice(0, 2) + '***' + s.slice(-1); };
@@ -242,6 +242,243 @@ async function cronRefund() {
   return { checked: ids.length, refunded, cleaned };
 }
 
+
+/* ---- Layanan tambahan: OTP WhatsApp, Shopee siap pakai, Telegram/WhatsApp siap pakai ----
+   Kunci Redis baru (tidak menyentuh data lama): xo:<id> data order, xords:<user> daftar order, xpend set order tertunda. */
+function makeExt(h) {
+  const { R, ditz, sell, bal, credit, refundOnce, feedPush, fail, REFUND } = h;
+  const KINDS = { wa: 'OTP WhatsApp', sp: 'Shopee Siap Pakai', tg: 'Telegram Siap Pakai', tw: 'WhatsApp Siap Pakai' };
+  const PATHS = { 'otpwa-services': 'wa', 'shopee-countries': 'sp', 'tg-countries': 'tg' };
+  const REASONS = ['registered', 'no_wa_option', 'changed_mind'];
+  const low = (v) => String(v == null ? '' : v).toLowerCase();
+  const num = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+  const rows = (d, k) => { const a = Array.isArray(d) ? d : (d && (d[k] || d.data || d.items || d.result)); return Array.isArray(a) ? a : []; };
+  const pick = (o, ks) => { for (const k of ks) if (o && o[k] != null && o[k] !== '') return o[k]; return null; };
+  const stockOf = (x) => { const v = pick(x, ['stock', 'stok', 'count', 'available', 'qty']); return num(v); };
+  const scrub = (d) => { const o = {}; Object.keys(d || {}).forEach((k) => { if (!/api_?key/i.test(k) && k !== 'price') o[k] = d[k]; }); return o; };
+
+  const kindOf = (k) => { if (!KINDS[k]) throw fail(400, 'invalid_param', 'Jenis layanan tidak valid'); return k; };
+  const readyKind = (app) => {
+    const a = low(app || 'telegram');
+    if (a === 'telegram') return 'tg';
+    if (a === 'whatsapp') return 'tw';
+    throw fail(400, 'invalid_param', 'app harus telegram atau whatsapp');
+  };
+  const kindOfPath = (path, app) => (path === 'tg-countries' ? readyKind(app) : PATHS[path]);
+
+  const waRows = (d) => rows(d, 'services').map((x) => {
+    const src = [x.offers, x.prices, x.options].find(Array.isArray) || (num(x.price) !== null ? [x] : []);
+    return {
+      id: String(pick(x, ['id', 'service_id']) || ''),
+      name: String(pick(x, ['name', 'app_name', 'service_name', 'title', 'id']) || ''),
+      free_name: x.free_name === true || x.free_name === 'true' || x.free_name === 1,
+      offers: src.map((o) => (o && typeof o === 'object' ? o : { price: o })).filter((o) => num(o.price) !== null)
+        .map((o) => ({ base: num(o.price), price: sell(o.price), stock: stockOf(o) }))
+    };
+  }).filter((x) => x.id);
+
+  const ctRows = (d) => rows(d, 'countries').map((x) => {
+    const code = String(pick(x, ['code', 'country', 'id', 'iso']) || '');
+    return {
+      code,
+      name: String(pick(x, ['name', 'country_name', 'nama']) || code),
+      flag: pick(x, ['flag', 'emoji']) || '',
+      price: sell(x.price),
+      stock: stockOf(x),
+      on: !(x.on === false || x.on === 'false' || x.on === 0)
+    };
+  }).filter((x) => x.code);
+
+  async function raw(kind) {
+    if (kind === 'wa') return waRows(await ditz('otpwa-services'));
+    if (kind === 'sp') return ctRows(await ditz('shopee-countries'));
+    return ctRows(await ditz('tg-countries', { app: kind === 'tw' ? 'whatsapp' : 'telegram' }));
+  }
+  async function list(kind) {
+    const l = await raw(kind);
+    return kind === 'wa'
+      ? l.map((x) => ({ id: x.id, name: x.name, free_name: x.free_name, offers: x.offers.map((o) => ({ price: o.price, stock: o.stock })) }))
+      : l;
+  }
+
+  async function quote(kind, b) {
+    const l = await raw(kind);
+    if (kind === 'wa') {
+      const id = String(b.service_id == null ? '' : b.service_id);
+      if (!/^[\w.\-]{1,40}$/.test(id)) throw fail(400, 'invalid_param', 'service_id tidak valid');
+      const svc = l.find((x) => x.id === id);
+      const price = Math.round(Number(b.price));
+      const offer = svc && svc.offers.find((o) => Math.round(o.price) === price);
+      if (!offer) throw fail(404, 'service_unavailable', 'Layanan atau harga tidak tersedia, muat ulang daftar');
+      if (offer.stock === 0) throw fail(409, 'out_of_stock', 'Stok habis');
+      const params = { service_id: svc.id, price: offer.base };
+      if (svc.free_name) {
+        const nm = String(b.app_name || '').trim();
+        if (nm.length < 2 || nm.length > 40) throw fail(400, 'invalid_param', 'app_name wajib diisi (2 sampai 40 karakter) untuk layanan ini');
+        params.app_name = nm;
+      }
+      return { kind, price: offer.price, name: svc.name + (params.app_name ? ' (' + params.app_name + ')' : ''), call: 'otpwa-buy', params };
+    }
+    const code = String(b.country || '');
+    if (!/^[A-Za-z0-9]{1,8}$/.test(code)) throw fail(400, 'invalid_param', 'country tidak valid');
+    const row = l.find((x) => low(x.code) === low(code));
+    if (!row) throw fail(404, 'service_unavailable', 'Negara tidak tersedia');
+    if (!row.on) throw fail(409, 'maintenance', 'Negara ini sedang maintenance');
+    if (row.stock === 0) throw fail(409, 'out_of_stock', 'Stok habis');
+    return {
+      kind, price: row.price, name: KINDS[kind] + ' - ' + row.name,
+      call: kind === 'sp' ? 'shopee-buy' : 'tg-buy',
+      params: kind === 'sp' ? { country: row.code } : { app: kind === 'tw' ? 'whatsapp' : 'telegram', country: row.code }
+    };
+  }
+
+  async function own(u, id, only) {
+    if (!/^[\w\-]{8,64}$/.test(String(id || ''))) throw fail(400, 'invalid_param', 'ID order tidak valid');
+    const rec = JSON.parse((await R('GET', 'xo:' + id)) || 'null');
+    if (!rec || rec.u !== u || (only && !only.includes(rec.kind))) throw fail(404, 'not_found', 'Order tidak ditemukan');
+    return rec;
+  }
+
+  async function buy(u, kind, b) {
+    const q = await quote(kindOf(kind), b);
+    if (!(q.price > 0)) throw fail(400, 'invalid_param', 'Harga belum tersedia');
+    const left = await R('DECRBY', 'bal:' + u, q.price);
+    if (left < 0) { await credit(u, q.price); throw fail(402, 'insufficient_balance', 'Saldo tidak cukup', { balance: left + q.price, price: q.price }); }
+    let d;
+    try { d = await ditz(q.call, q.params); } catch (e) { await credit(u, q.price); throw e; }
+    const id = String(pick(d, ['id', 'order_id', 'uuid']) || '');
+    if (!id) { await credit(u, q.price); throw fail(502, 'upstream_invalid', 'Respons penyedia tidak memuat id order'); }
+    await R('SET', 'xo:' + id, JSON.stringify({ u, price: q.price, kind, name: q.name, at: Date.now() }), 'EX', 2592000);
+    await R('LPUSH', 'xords:' + u, id); await R('LTRIM', 'xords:' + u, 0, 29);
+    if (kind !== 'sp') await R('SADD', 'xpend', id);
+    await feedPush('order', u, 'order ' + KINDS[kind] + ' Rp ' + q.price.toLocaleString('id-ID'));
+    return { ...scrub(d), id, kind, name: q.name, price_sell: q.price, balance: await bal(u) };
+  }
+
+  const view = (id, rec, o, extra) => {
+    const has = o && Object.keys(o).length > 0;
+    const st = low(pick(o, ['status', 'state'])) || (rec.kind === 'sp' ? 'success' : (has ? 'waiting' : 'unknown'));
+    let c = pick(o, ['code', 'otp', 'verification_code']);
+    if (c != null && low(c) === 'waiting') c = null;
+    const n = pick(o, ['number', 'phone', 'nomor']);
+    return { id, kind: rec.kind, name: rec.name, status: st, number: n == null ? null : String(n), code: c == null ? null : String(c), price: rec.price, ...extra };
+  };
+
+  async function status(u, id, only) {
+    const rec = await own(u, id, only);
+    let o;
+    if (rec.kind === 'wa') o = rows(await ditz('otpwa-orders'), 'orders').find((x) => String(x.id) === id) || {};
+    else if (rec.kind === 'sp') o = await ditz('shopee-code', { id });
+    else o = await ditz('status', { id });
+    const v = view(id, rec, o);
+    let refunded = false;
+    if (rec.kind !== 'sp' && REFUND.has(v.status)) { await refundOnce(rec.u, id, rec.price); refunded = true; await R('SREM', 'xpend', id); }
+    if (v.code && rec.kind !== 'sp') {
+      if ((await R('SETNX', 'otpf:' + id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
+      await R('SREM', 'xpend', id);
+    }
+    return { ...v, refunded: refunded || !!(await R('GET', 'ref:' + id)), balance: await bal(u) };
+  }
+
+  async function code(u, id, only) {
+    const rec = await own(u, id, only);
+    let r = null;
+    if (rec.kind === 'wa') r = await ditz('otpwa-code', { id });
+    else if (rec.kind !== 'sp') throw fail(400, 'invalid_param', 'Order ini menerima kode otomatis, cukup cek status');
+    const s = await status(u, id, only);
+    const c = pick(r, ['code', 'otp']);
+    if (!s.code && c != null) s.code = String(c);
+    return s;
+  }
+
+  async function cancel(u, id, reason, only) {
+    const rec = await own(u, id, only);
+    if (rec.kind === 'sp') throw fail(400, 'not_cancelable', 'Akun Shopee tidak bisa dibatalkan. Kirim komplain bila ada masalah');
+    if (rec.kind === 'wa') {
+      const r = low(reason || 'changed_mind');
+      if (!REASONS.includes(r)) throw fail(400, 'invalid_param', 'reason harus salah satu dari: ' + REASONS.join(', '));
+      await ditz('otpwa-cancel', { id, reason: r });
+    } else await ditz('cancel', { id });
+    const refunded = await refundOnce(rec.u, id, rec.price);
+    await R('SREM', 'xpend', id);
+    await feedPush('cancel', u, 'order dibatalkan, saldo kembali');
+    return { id, kind: rec.kind, status: 'canceled', refunded, balance: await bal(u) };
+  }
+
+  async function confirm(u, id, only) {
+    const rec = await own(u, id, only);
+    if (rec.kind !== 'wa') throw fail(400, 'invalid_param', 'Konfirmasi hanya untuk OTP WhatsApp');
+    await ditz('otpwa-confirm', { id });
+    await R('SREM', 'xpend', id);
+    return { id, kind: rec.kind, status: 'confirmed', balance: await bal(u) };
+  }
+
+  async function complain(u, id, message, only) {
+    const rec = await own(u, id, only);
+    if (rec.kind !== 'sp') throw fail(400, 'invalid_param', 'Komplain hanya untuk akun Shopee');
+    const m = String(message || '').trim();
+    if (m.length < 5 || m.length > 1000) throw fail(400, 'invalid_param', 'message 5 sampai 1000 karakter');
+    await ditz('shopee-complain', { id, message: m });
+    return { id, sent: true };
+  }
+
+  async function orders(u, only) {
+    const ids = (await R('LRANGE', 'xords:' + u, 0, 29)) || [];
+    const recs = (await Promise.all(ids.map(async (id) => {
+      const r = JSON.parse((await R('GET', 'xo:' + id)) || 'null');
+      return r && r.u === u ? { id, ...r } : null;
+    }))).filter((r) => r && (!only || only.includes(r.kind))).slice(0, 15);
+    let wl = null, sl = null;
+    const out = [];
+    for (const r of recs) {
+      let o = {};
+      try {
+        if (r.kind === 'wa') { wl = wl || rows(await ditz('otpwa-orders'), 'orders'); o = wl.find((x) => String(x.id) === r.id) || {}; }
+        else if (r.kind === 'sp') { sl = sl || rows(await ditz('shopee-orders', { limit: 30 }), 'orders'); o = sl.find((x) => String(x.id) === r.id) || {}; }
+      } catch (e) { /* tampilkan data lokal saja */ }
+      const v = view(r.id, r, o, { created_at: r.at ? new Date(r.at).toISOString() : null });
+      if (r.kind === 'sp') { v.email = pick(o, ['email']); v.password = pick(o, ['password', 'pass']); }
+      out.push(v);
+    }
+    return out;
+  }
+
+  // Dipanggil dari cron: kembalikan saldo order tertunda yang batal/gagal/kedaluwarsa walau user tidak membuka halamannya
+  async function cronPending() {
+    const ids = ((await R('SMEMBERS', 'xpend')) || []).slice(0, 60);
+    let refunded = 0, wl = null;
+    for (const id of ids) {
+      try {
+        const rec = JSON.parse((await R('GET', 'xo:' + id)) || 'null');
+        if (!rec) { await R('SREM', 'xpend', id); continue; }
+        let st = '', c = '';
+        if (rec.kind === 'wa') {
+          wl = wl || rows(await ditz('otpwa-orders'), 'orders');
+          const o = wl.find((x) => String(x.id) === id);
+          if (!o) continue;
+          st = low(o.status); c = pick(o, ['code', 'otp']) || '';
+        } else {
+          const d = await ditz('status', { id });
+          st = low(d.status); c = d.otp && low(d.otp) !== 'waiting' ? d.otp : '';
+        }
+        if (REFUND.has(st)) {
+          if (await refundOnce(rec.u, id, rec.price)) { refunded++; await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis'); }
+          await R('SREM', 'xpend', id);
+        } else if (c) await R('SREM', 'xpend', id);
+      } catch (e) { /* dicek lagi di jadwal berikutnya */ }
+    }
+    return { x_checked: ids.length, x_refunded: refunded };
+  }
+
+  return { KINDS, PATHS, kindOf, readyKind, kindOfPath, list, quote, buy, status, code, cancel, confirm, complain, orders, cronPending, guard: own };
+}
+
+const X = makeExt({
+  R, ditz, sell, bal, credit, feedPush, REFUND,
+  refundOnce: async (u, id, p) => ((await R('SETNX', 'ref:' + id, '1')) === 1 ? (await credit(u, p), true) : false),
+  fail: (status, code, msg) => new HttpErr(status, msg)
+});
+
 module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const send = (c, o) => { res.statusCode = c; res.end(JSON.stringify(o)); };
@@ -253,11 +490,16 @@ module.exports = async (req, res) => {
       if (!sec) throw new HttpErr(500, 'CRON_SECRET belum diisi di Vercel');
       const given = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String(req.query.secret || '');
       if (given !== sec) throw new HttpErr(401, 'Tidak diizinkan');
-      return send(200, await cronRefund());
+      return send(200, { ...(await cronRefund()), ...(await X.cronPending().catch(() => ({}))) });
     }
     if (req.method === 'GET') {
       const q = req.query || {}, path = String(q.path || '');
       if (!READ.has(path)) throw new HttpErr(400, 'Endpoint tidak diizinkan');
+      if (X.PATHS[path]) {   // OTP WhatsApp / Shopee / Telegram-WhatsApp siap pakai: daftar sudah dinormalkan + markup
+        const out = await X.list(X.kindOfPath(path, q.app));
+        res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+        return send(200, out);
+      }
       const p = {};
       for (const k of ['server', 'country', 'service']) if (q[k] !== undefined) p[k] = String(q[k]).slice(0, 40);
       let d = await ditz(path, p);
@@ -283,6 +525,17 @@ module.exports = async (req, res) => {
         if (process.env.ADMIN_EMAIL && u === kEmail(process.env.ADMIN_EMAIL)) out.owner = (await ditz('profile')).balance;
         return send(200, out);
       }
+      case 'x_quote': {   // layanan tambahan (wa / sp / tg / tw)
+        const k = X.kindOf(String(b.kind || '')), q = await X.quote(k, b);
+        return send(200, { price: q.price, name: q.name, balance: await bal(u) });
+      }
+      case 'x_buy': return send(200, await X.buy(u, String(b.kind || ''), b));
+      case 'x_status': return send(200, await X.status(u, b.id));
+      case 'x_code': return send(200, await X.code(u, b.id));
+      case 'x_cancel': return send(200, await X.cancel(u, b.id, b.reason));
+      case 'x_confirm': return send(200, await X.confirm(u, b.id));
+      case 'x_complain': return send(200, await X.complain(u, b.id, b.message));
+      case 'x_orders': return send(200, { items: await X.orders(u), balance: await bal(u) });
       case 'quote': {
         const { price } = await quote(b);
         return send(200, { price, balance: await bal(u) });
