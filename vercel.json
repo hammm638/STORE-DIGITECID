@@ -2,5 +2,8 @@
   "rewrites": [
     { "source": "/", "destination": "/granted/index.html" },
     { "source": "/index.html", "destination": "/granted/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/ditz?cron=1", "schedule": "*/5 * * * *" }
   ]
 }
