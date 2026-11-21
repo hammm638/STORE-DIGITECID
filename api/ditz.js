@@ -7,6 +7,7 @@ const RTOK = () => 'gQAAAAAAAzMoAAIgcDIzOWE4YzMwMzhmMWQ0MDczOTJmZjdkYWJhMGZkMjFh
 const READ = new Set(['countries', 'services', 'operators']);
 const REFUND = new Set(['canceled', 'cancelled', 'expired', 'failed', 'refunded', 'timeout', 'batal', 'kadaluarsa']);
 const kEmail = (e) => String(e || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+const mask = (u) => { const s = String(u || ''); return s.slice(0, 2) + '***' + s.slice(-1); };
 const sell = (p) => Math.round(Number(p || 0) * (1 + MARKUP() / 100));
 
 class HttpErr extends Error { constructor(code, detail) { super(detail); this.code = code; } }
@@ -29,6 +30,7 @@ async function ditz(path, params) {
   return d;
 }
 
+const feedPush = async (k, u, x) => { try { await R('LPUSH', 'feed', JSON.stringify({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, u: mask(u), x, t: Date.now() })); await R('LTRIM', 'feed', 0, 49); } catch (e) { /* feed tidak boleh menggagalkan order */ } };
 const bal = async (u) => Number(await R('GET', 'bal:' + u)) || 0;
 const credit = (u, n) => R('INCRBY', 'bal:' + u, Math.round(n));
 
@@ -150,7 +152,7 @@ async function ownDep(u, id) {
 }
 async function checkDep(u, id) {
   const d = await ditz('deposit/status', { id });
-  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) await credit(u, d.total_diterima || d.nominal);
+  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) { await credit(u, d.total_diterima || d.nominal); await feedPush('deposit', u, 'deposit berhasil Rp ' + Number(d.nominal || 0).toLocaleString('id-ID')); }
   return d;
 }
 
@@ -204,18 +206,21 @@ module.exports = async (req, res) => {
           d = await ditz('order', p);
         } catch (e) { await credit(u, price); throw e; }
         await R('SET', 'ord:' + d.id, JSON.stringify({ u, price }), 'EX', 604800);
+        await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'));
         return send(200, { ...d, price_sell: price, balance: await bal(u) });
       }
       case 'status': {
         const rec = await ownOrder(u, b.id);
         const d = await ditz('status', { id: b.id });
         if (REFUND.has(String(d.status).toLowerCase())) await refundOnce(u, b.id, rec.price);
+        if (d.otp && String(d.otp).toLowerCase() !== 'waiting' && (await R('SETNX', 'otpf:' + b.id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
         return send(200, { ...d, balance: await bal(u) });
       }
       case 'cancel': {
         const rec = await ownOrder(u, b.id);
         const d = await ditz('cancel', { id: b.id });
         await refundOnce(u, b.id, rec.price);
+        await feedPush('cancel', u, 'order dibatalkan, saldo kembali');
         return send(200, { ...d, balance: await bal(u) });
       }
       case 'deposit_create': {
@@ -255,7 +260,11 @@ module.exports = async (req, res) => {
         return send(200, { items: list.filter(Boolean).map((d) => ({ id: d.id, nominal: d.nominal, status: d.status, created_at: d.created_at })), balance: await bal(u) });
       }
       case 'notifs': {
-        const l = (await R('LRANGE', 'notifs', 0, 4)) || [];
+        const l = (await R('LRANGE', 'notifs', 0, 19)) || [];
+        return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
+      }
+      case 'feed': {
+        const l = (await R('LRANGE', 'feed', 0, 29)) || [];
         return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
       }
       case 'catalog': return send(200, JSON.parse((await R('GET', 'catalog')) || '{}'));
