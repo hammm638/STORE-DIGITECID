@@ -146,13 +146,42 @@ async function ownOrder(u, id) {
   if (!rec || rec.u !== u) throw new HttpErr(404, 'Order tidak ditemukan');
   return rec;
 }
+
+/* ---- Statistik harian per user (grafik dashboard) ---- */
+const dayWIB = (t) => new Date(Number(t) + 25200000).toISOString().slice(0, 10);
+async function userStat(u, kind, amt) {   // kind: 'o' = order, 'dp' = deposit berhasil
+  try {
+    const k = 'ust:' + u + ':' + dayWIB(Date.now());
+    await R('HINCRBY', k, kind, 1);
+    await R('HINCRBY', k, kind + 's', Math.round(Number(amt) || 0));
+    await R('EXPIRE', k, 7776000);
+  } catch (e) { /* statistik tidak boleh menggagalkan transaksi */ }
+}
+
+/* ---- Indeks profil ringan (tanpa foto) supaya daftar user cepat ---- */
+async function lightProfiles() {
+  const [a, b] = await Promise.all([R('HLEN', 'prof'), R('HLEN', 'pidx')]);
+  if ((Number(a) || 0) > (Number(b) || 0)) {   // isi indeks sekali dari data lama (foto tidak ikut disalin)
+    let cur = '0', guard = 0;
+    do {
+      const r = (await R('HSCAN', 'prof', cur, 'COUNT', 100)) || ['0', []];
+      cur = String(r[0]); const arr = r[1] || [], args = [];
+      for (let i = 0; i + 1 < arr.length; i += 2) {
+        try { const o = JSON.parse(arr[i + 1]); if (o && o.u) args.push(arr[i], JSON.stringify({ u: o.u, e: o.e || '', s: o.s || 0 })); } catch (e) { /* lewati */ }
+      }
+      if (args.length) await R('HSET', 'pidx', ...args);
+    } while (cur !== '0' && ++guard < 400);
+  }
+  return (await R('HGETALL', 'pidx')) || [];
+}
+
 async function refundOnce(u, id, price) { if ((await R('SETNX', 'ref:' + id, '1')) === 1) await credit(u, price); }
 async function ownDep(u, id) {
   if (!/^[\w\-]{3,64}$/.test(String(id || '')) || (await R('GET', 'dep:' + id)) !== u) throw new HttpErr(404, 'Deposit tidak ditemukan');
 }
 async function checkDep(u, id) {
   const d = await ditz('deposit/status', { id });
-  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) { await credit(u, d.total_diterima || d.nominal); await feedPush('deposit', u, 'deposit berhasil Rp ' + Number(d.nominal || 0).toLocaleString('id-ID')); }
+  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) { await credit(u, d.total_diterima || d.nominal); await feedPush('deposit', u, 'deposit berhasil Rp ' + Number(d.nominal || 0).toLocaleString('id-ID')); await userStat(u, 'dp', d.nominal); }
   return d;
 }
 
@@ -213,6 +242,7 @@ module.exports = async (req, res) => {
           d = await ditz('order', p);
         } catch (e) { await credit(u, price); throw e; }
         await R('SET', 'ord:' + d.id, JSON.stringify({ u, price }), 'EX', 604800);
+        await userStat(u, 'o', price);
         await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'));
         return send(200, { ...d, price_sell: price, balance: await bal(u) });
       }
@@ -363,10 +393,11 @@ module.exports = async (req, res) => {
         let old = {};
         try { old = JSON.parse(await R('HGET', 'prof', u)) || {}; } catch (e) { /* belum ada */ }
         await R('HSET', 'prof', u, JSON.stringify({ u: un, p: ph, e: em, s: old.s || Date.now() }));
+        await R('HSET', 'pidx', u, JSON.stringify({ u: un, e: em, s: old.s || Date.now() }));
         return send(200, { ok: true });
       }
       case 'profile_list': {   // daftar semua akun untuk chat private: tanpa email, tanpa foto (foto diambil lewat 'profiles')
-        const all = (await R('HGETALL', 'prof')) || [];
+        const all = await lightProfiles();
         const list = [];
         for (let i = 0; i + 1 < all.length; i += 2) {
           try { const o = JSON.parse(all[i + 1]); if (o && o.u && o.e) list.push({ k: all[i], c: kEmail(o.e), u: String(o.u), s: Number(o.s) || 0 }); } catch (e) { /* lewati */ }
@@ -385,7 +416,7 @@ module.exports = async (req, res) => {
       }
       case 'admin_users': {   // semua user: username, email, saldo, waktu join, status ban, perangkat terikat
         adminOnly();
-        const all = (await R('HGETALL', 'prof')) || [];
+        const all = await lightProfiles();
         const rows = [];
         for (let i = 0; i + 1 < all.length; i += 2) {
           try { const o = JSON.parse(all[i + 1]); if (o && o.u) rows.push({ k: all[i], u: String(o.u), e: String(o.e || ''), s: Number(o.s) || 0 }); } catch (e) { /* lewati */ }
@@ -473,6 +504,15 @@ module.exports = async (req, res) => {
         for (let i = 0; i < ks.length; i += 20) await Promise.all(ks.slice(i, i + 20).map((k) => (b.ban ? R('SET', 'ban:' + k, '1') : R('DEL', 'ban:' + k))));
         await auditLog((b.ban ? 'Ban massal ' : 'Unban massal ') + ks.length + ' user');
         return send(200, { count: ks.length });
+      }
+      case 'my_stats': {   // grafik order & deposit milik user sendiri (14 hari, WIB)
+        const n = 14;
+        const days = await Promise.all(Array.from({ length: n }, (_, i) => dayWIB(Date.now() - (n - 1 - i) * 86400000)).map(async (dk) => {
+          const h = (await R('HGETALL', 'ust:' + u + ':' + dk)) || [], o = { t: dk, o: 0, os: 0, dp: 0, dps: 0 };
+          for (let j = 0; j + 1 < h.length; j += 2) o[h[j]] = Number(h[j + 1]) || 0;
+          return o;
+        }));
+        return send(200, { days });
       }
       case 'admin_events': {   // rekap order/deposit per hari (WIB), dihimpun dari feed dan disimpan permanen
         adminOnly();
