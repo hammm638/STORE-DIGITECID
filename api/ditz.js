@@ -242,123 +242,6 @@ async function cronRefund() {
   return { checked: ids.length, refunded, cleaned };
 }
 
-
-/* ================= DIGITECID PLAY =================
-   Poin virtual hiburan. Terpisah total dari saldo (bal:), deposit, dan order OTP.
-   Semua perhitungan di server; browser hanya menampilkan hasil. Poin tidak bisa dibeli, ditransfer, dijual, atau dicairkan.
-   Key Redis (semua berawalan play:): pts:<u>, cnt:<u>:<hari>, cd:<u>, hist:<u>, req:<id>, reqs, reqs:<u>, rs:<u>:<hadiah>, own:<u>, dec:<id>, lk:<u> */
-const PLAY = {
-  COLS: 6, ROWS: 5, SYMS: 6, DAILY: 40, COOLDOWN_MS: 1200,
-  REWARDS: [
-    { id: 'badge_perintis', type: 'Badge profil', label: 'Badge Perintis', cost: 500 },
-    { id: 'badge_bintang', type: 'Badge profil', label: 'Badge Bintang Hijau', cost: 1200 },
-    { id: 'tema_aurora', type: 'Tema profil', label: 'Tema Aurora', cost: 2500 },
-    { id: 'tema_midnight', type: 'Tema profil', label: 'Tema Midnight', cost: 4000 },
-  ],
-};
-const playReward = (id) => PLAY.REWARDS.find((r) => r.id === id);
-const pKey = (u) => 'play:pts:' + u;
-const pts = async (u) => Math.max(0, Number(await R('GET', pKey(u))) || 0);
-// 30 simbol acak dari CSPRNG server, urut baris demi baris (6 kolom x 5 baris)
-function playGrid() { return Array.from({ length: PLAY.COLS * PLAY.ROWS }, () => crypto.randomInt(0, PLAY.SYMS)); }
-// 8+ simbol sama di mana saja = menang. Poin dasar 1 per putaran.
-function playScore(grid) {
-  const cnt = new Array(PLAY.SYMS).fill(0);
-  grid.forEach((k) => { cnt[k]++; });
-  let p = 1; const wins = [];
-  cnt.forEach((n, k) => { if (n >= 8) { p += n >= 12 ? 40 : n >= 10 ? 12 : 4; wins.push(k + ':' + n); } });
-  return { p, wins };
-}
-const jparse = (x) => { try { return JSON.parse(x); } catch (e) { return null; } };
-const reqId = () => 'PLY-' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(3).toString('hex').toUpperCase();
-
-async function playState(u) {
-  const day = dayWIB(Date.now());
-  const [balPts, used, histRaw, ids, ownRaw] = await Promise.all([
-    pts(u), R('GET', 'play:cnt:' + u + ':' + day), R('LRANGE', 'play:hist:' + u, 0, 14), R('LRANGE', 'play:reqs:' + u, 0, 19), R('HGETALL', 'play:own:' + u),
-  ]);
-  const own = {};
-  for (let i = 0; ownRaw && i + 1 < ownRaw.length; i += 2) own[ownRaw[i]] = true;
-  const claims = await Promise.all(PLAY.REWARDS.map((r) => R('GET', 'play:rs:' + u + ':' + r.id)));
-  const rewards = PLAY.REWARDS.map((r, i) => ({ id: r.id, type: r.type, label: r.label, cost: r.cost, st: own[r.id] ? 'approved' : claims[i] ? 'pending' : 'none' }));
-  const recs = ids && ids.length ? await R('MGET', ...ids.map((id) => 'play:req:' + id)) : [];
-  const reqs = (recs || []).map(jparse).filter(Boolean).map((x) => ({ id: x.id, reward: x.reward, label: x.label, pts: x.pts, t: x.t, st: x.st, dec: x.dec || [] }));
-  const hist = (histRaw || []).map(jparse).filter(Boolean);
-  return { pts: balPts, used: Number(used) || 0, limit: PLAY.DAILY, left: Math.max(0, PLAY.DAILY - (Number(used) || 0)), rewards, reqs, hist };
-}
-
-async function playSpin(u) {
-  if ((await R('SET', 'play:cd:' + u, '1', 'NX', 'PX', PLAY.COOLDOWN_MS)) !== 'OK') throw new HttpErr(429, 'Tunggu sebentar sebelum memutar lagi');
-  const day = dayWIB(Date.now()), ck = 'play:cnt:' + u + ':' + day;
-  const n = await R('INCR', ck);
-  if (n === 1) await R('EXPIRE', ck, 172800);
-  if (n > PLAY.DAILY) { await R('DECR', ck); throw new HttpErr(429, 'Batas putaran hari ini sudah tercapai. Kembali lagi besok.'); }
-  const grid = playGrid(), sc = playScore(grid);
-  const total = await R('INCRBY', pKey(u), sc.p);
-  await R('LPUSH', 'play:hist:' + u, JSON.stringify({ t: Date.now(), g: grid.join(''), p: sc.p, w: sc.wins }));
-  await R('LTRIM', 'play:hist:' + u, 0, 29);
-  return { grid, gained: sc.p, wins: sc.wins, pts: Number(total) || 0, left: Math.max(0, PLAY.DAILY - n) };
-}
-
-async function playRedeem(u, rewardId) {
-  const rw = playReward(String(rewardId || ''));
-  if (!rw) throw new HttpErr(400, 'Hadiah tidak tersedia');
-  if ((await R('SET', 'play:lk:' + u, '1', 'NX', 'EX', 8)) !== 'OK') throw new HttpErr(429, 'Permintaan sebelumnya masih diproses');
-  const id = reqId(), rsKey = 'play:rs:' + u + ':' + rw.id;
-  let claimed = false, taken = false;
-  try {
-    if ((await R('SETNX', rsKey, id)) !== 1) throw new HttpErr(409, 'Hadiah ini sudah kamu ajukan atau sudah kamu miliki');
-    claimed = true;
-    const left = await R('DECRBY', pKey(u), rw.cost);   // poin ditahan sampai admin memutuskan
-    taken = true;
-    if (left < 0) throw new HttpErr(400, 'Poin belum cukup untuk hadiah ini');
-    let prof = {}; try { prof = jparse(await R('HGET', 'prof', u)) || {}; } catch (e) { /* belum ada profil */ }
-    const rec = { id, u, email: String(prof.e || u), username: String(prof.u || ''), reward: rw.id, label: rw.label, type: rw.type, pts: rw.cost, t: Date.now(), st: 'pending', dec: [] };
-    await R('SET', 'play:req:' + id, JSON.stringify(rec));
-    await R('LPUSH', 'play:reqs', id); await R('LTRIM', 'play:reqs', 0, 499);
-    await R('LPUSH', 'play:reqs:' + u, id); await R('LTRIM', 'play:reqs:' + u, 0, 49);
-    claimed = false; taken = false;
-    return { id, pts: await pts(u) };
-  } catch (e) {
-    if (taken) await R('INCRBY', pKey(u), rw.cost);
-    if (claimed) await R('DEL', rsKey);
-    throw e;
-  } finally { await R('DEL', 'play:lk:' + u); }
-}
-
-async function playAdminList() {
-  const ids = (await R('LRANGE', 'play:reqs', 0, 99)) || [];
-  const recs = ids.length ? ((await R('MGET', ...ids.map((id) => 'play:req:' + id))) || []).map(jparse).filter(Boolean) : [];
-  const users = [...new Set(recs.map((x) => x.u))];
-  const cur = users.length ? ((await R('MGET', ...users.map((k) => 'play:pts:' + k))) || []) : [];
-  const pm = {}; users.forEach((k, i) => { pm[k] = Math.max(0, Number(cur[i]) || 0); });
-  return { items: recs.map((x) => ({ ...x, key: x.u, pts_now: pm[x.u] || 0 })) };
-}
-
-async function playAdminDecide(adminU, id, decision) {
-  if (!/^PLY-[A-Z0-9]{6,30}$/.test(String(id || ''))) throw new HttpErr(400, 'ID pengajuan tidak valid');
-  if (decision !== 'approve' && decision !== 'reject') throw new HttpErr(400, 'Keputusan tidak valid');
-  if ((await R('SET', 'play:dec:' + id, '1', 'NX', 'EX', 30)) !== 'OK') throw new HttpErr(429, 'Pengajuan ini sedang diproses');
-  try {
-    const rec = jparse(await R('GET', 'play:req:' + id));
-    if (!rec) throw new HttpErr(404, 'Pengajuan tidak ditemukan');
-    if (rec.st !== 'pending') throw new HttpErr(409, 'Pengajuan ini sudah diputuskan');
-    const now = Date.now();
-    if (decision === 'approve') {
-      await R('HSET', 'play:own:' + rec.u, rec.reward, JSON.stringify({ t: now, id }));
-      rec.st = 'approved';
-    } else {
-      await R('INCRBY', pKey(rec.u), rec.pts);        // poin dikembalikan sekali (dijaga lock + status)
-      await R('DEL', 'play:rs:' + rec.u + ':' + rec.reward);
-      rec.st = 'rejected';
-    }
-    rec.dec = (rec.dec || []).concat([{ st: rec.st, t: now, by: adminU }]);
-    await R('SET', 'play:req:' + id, JSON.stringify(rec));
-    await auditLog('PLAY ' + (decision === 'approve' ? 'setujui' : 'tolak') + ' ' + id + ' ' + rec.label + ' (' + rec.pts + ' poin) untuk ' + rec.u);
-    return rec;
-  } finally { await R('DEL', 'play:dec:' + id); }
-}
-
 module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const send = (c, o) => { res.statusCode = c; res.end(JSON.stringify(o)); };
@@ -727,12 +610,6 @@ module.exports = async (req, res) => {
         }));
         return send(200, { days });
       }
-      /* ---- DIGITECID PLAY (poin virtual, terpisah dari saldo) ---- */
-      case 'play_state': return send(200, await playState(u));
-      case 'play_spin': return send(200, await playSpin(u));
-      case 'play_redeem': return send(200, await playRedeem(u, b.reward));
-      case 'play_admin_list': adminOnly(); return send(200, await playAdminList());
-      case 'play_admin_decide': { adminOnly(); const r = await playAdminDecide(u, b.id, b.decision); return send(200, { ok: true, st: r.st }); }
       default: throw new HttpErr(400, 'Aksi tidak dikenal');
     }
   } catch (e) {
