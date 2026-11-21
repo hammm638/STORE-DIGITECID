@@ -196,12 +196,52 @@ const auditLog = async (text) => {
   await R('LTRIM', 'audit', 0, 199);
 };
 
+/* ---- Refund otomatis terjadwal (dipanggil Vercel Cron): cek semua order yang masih tertunda ---- */
+async function cronRefund() {
+  if ((await R('SETNX', 'pend_init', '1')) === 1) {   // sekali: masukkan order lama (masih ada di server) ke daftar tertunda
+    let cur = '0', guard = 0;
+    do {
+      const r = (await R('SCAN', cur, 'MATCH', 'ord:*', 'COUNT', 500)) || ['0', []];
+      cur = String(r[0]);
+      const ks = (r[1] || []).map((k) => String(k).slice(4));
+      if (ks.length) await R('SADD', 'pend', ...ks);
+    } while (cur !== '0' && ++guard < 200);
+  }
+  const ids = ((await R('SMEMBERS', 'pend')) || []).slice(0, 80);
+  let refunded = 0, cleaned = 0;
+  for (let i = 0; i < ids.length; i += 10) {
+    await Promise.all(ids.slice(i, i + 10).map(async (id) => {
+      try {
+        if (await R('GET', 'ref:' + id)) { await R('SREM', 'pend', id); cleaned++; return; }
+        const rec = JSON.parse((await R('GET', 'ord:' + id)) || 'null');
+        if (!rec) { await R('SREM', 'pend', id); cleaned++; return; }
+        const d = await ditz('status', { id });
+        if (REFUND.has(String(d.status).toLowerCase())) {
+          if ((await R('SETNX', 'ref:' + id, '1')) === 1) {
+            await credit(rec.u, rec.price); refunded++;
+            await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis');
+          }
+          await R('SREM', 'pend', id); cleaned++;
+        } else if (d.otp && String(d.otp).toLowerCase() !== 'waiting') { await R('SREM', 'pend', id); cleaned++; }
+      } catch (e) { /* dicek lagi di jadwal berikutnya */ }
+    }));
+  }
+  return { checked: ids.length, refunded, cleaned };
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const send = (c, o) => { res.statusCode = c; res.end(JSON.stringify(o)); };
   try {
     if (!KEY()) throw new HttpErr(500, 'DITZ_APIKEY belum diisi');
 
+    if (req.method === 'GET' && req.query && req.query.cron) {   // dipanggil Vercel Cron / pinger luar
+      const sec = process.env.CRON_SECRET;
+      if (!sec) throw new HttpErr(500, 'CRON_SECRET belum diisi di Vercel');
+      const given = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String(req.query.secret || '');
+      if (given !== sec) throw new HttpErr(401, 'Tidak diizinkan');
+      return send(200, await cronRefund());
+    }
     if (req.method === 'GET') {
       const q = req.query || {}, path = String(q.path || '');
       if (!READ.has(path)) throw new HttpErr(400, 'Endpoint tidak diizinkan');
@@ -246,7 +286,7 @@ module.exports = async (req, res) => {
           d = await ditz('order', p);
         } catch (e) { await credit(u, price); throw e; }
         await R('SET', 'ord:' + d.id, JSON.stringify({ u, price }), 'EX', 604800);
-        await R('LPUSH', 'ords:' + u, d.id); await R('LTRIM', 'ords:' + u, 0, 9);
+        await R('LPUSH', 'ords:' + u, d.id); await R('LTRIM', 'ords:' + u, 0, 9); await R('SADD', 'pend', d.id);
         await userStat(u, 'o', price);
         await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'));
         return send(200, { ...d, price_sell: price, balance: await bal(u) });
