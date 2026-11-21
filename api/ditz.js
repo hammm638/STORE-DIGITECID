@@ -263,6 +263,24 @@ module.exports = async (req, res) => {
         const l = (await R('LRANGE', 'notifs', 0, 19)) || [];
         return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
       }
+      case 'apikey_info': {
+        const m = JSON.parse((await R('GET', 'apiu:' + u)) || 'null');
+        return send(200, m ? { has: true, prefix: m.p, created: m.t } : { has: false });
+      }
+      case 'apikey_create': {   // key hanya ditampilkan sekali; server menyimpan hash-nya saja. Membuat baru = mencabut yang lama
+        const key = 'dtz_' + crypto.randomBytes(24).toString('hex'), hh = crypto.createHash('sha256').update(key).digest('hex');
+        const old = JSON.parse((await R('GET', 'apiu:' + u)) || 'null');
+        if (old && old.h) await R('DEL', 'apik:' + old.h);
+        await R('SET', 'apik:' + hh, u);
+        await R('SET', 'apiu:' + u, JSON.stringify({ h: hh, p: key.slice(0, 10), t: Date.now() }));
+        return send(200, { key, prefix: key.slice(0, 10) });
+      }
+      case 'apikey_revoke': {
+        const old = JSON.parse((await R('GET', 'apiu:' + u)) || 'null');
+        if (old && old.h) await R('DEL', 'apik:' + old.h);
+        await R('DEL', 'apiu:' + u);
+        return send(200, { ok: true });
+      }
       case 'feed': {
         const l = (await R('LRANGE', 'feed', 0, 29)) || [];
         return send(200, { items: l.map((x) => { try { return JSON.parse(x); } catch (e) { return null; } }).filter(Boolean) });
