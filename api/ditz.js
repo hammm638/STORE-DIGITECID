@@ -192,7 +192,16 @@ async function ingestFeed() {
   }
 }
 
-async function refundOnce(u, id, price) { if ((await R('SETNX', 'ref:' + id, '1')) === 1) await credit(u, price); }
+/* ---- FIX: tandai order yang OTP-nya sudah masuk (otpg:<id>) supaya tidak pernah direfund ---- */
+const markOtp = (id) => R('SET', 'otpg:' + id, '1', 'EX', 2592000);
+const hasOtp = (d) => !!(d && d.otp && String(d.otp).toLowerCase() !== 'waiting');
+
+// FIX: refund diblokir kalau OTP sudah pernah masuk, walau status provider berubah jadi expired/canceled
+async function refundOnce(u, id, price) {
+  if (await R('GET', 'otpg:' + id)) return false;
+  if ((await R('SETNX', 'ref:' + id, '1')) === 1) { await credit(u, price); return true; }
+  return false;
+}
 async function ownDep(u, id) {
   if (!/^[\w\-]{3,64}$/.test(String(id || '')) || (await R('GET', 'dep:' + id)) !== u) throw new HttpErr(404, 'Deposit tidak ditemukan');
 }
@@ -226,16 +235,18 @@ async function cronRefund() {
     await Promise.all(ids.slice(i, i + 10).map(async (id) => {
       try {
         if (await R('GET', 'ref:' + id)) { await R('SREM', 'pend', id); cleaned++; return; }
+        if (await R('GET', 'otpg:' + id)) { await R('SREM', 'pend', id); cleaned++; return; }   // FIX: OTP sudah masuk
         const rec = JSON.parse((await R('GET', 'ord:' + id)) || 'null');
         if (!rec) { await R('SREM', 'pend', id); cleaned++; return; }
         const d = await ditz('status', { id });
+        if (hasOtp(d)) { await markOtp(id); await R('SREM', 'pend', id); cleaned++; return; }   // FIX: cek OTP dulu sebelum refund
         if (REFUND.has(String(d.status).toLowerCase())) {
           if ((await R('SETNX', 'ref:' + id, '1')) === 1) {
             await credit(rec.u, rec.price); refunded++;
             await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis');
           }
           await R('SREM', 'pend', id); cleaned++;
-        } else if (d.otp && String(d.otp).toLowerCase() !== 'waiting') { await R('SREM', 'pend', id); cleaned++; }
+        }
       } catch (e) { /* dicek lagi di jadwal berikutnya */ }
     }));
   }
@@ -372,7 +383,9 @@ function makeExt(h) {
     else o = await ditz('status', { id });
     const v = view(id, rec, o);
     let refunded = false;
-    if (rec.kind !== 'sp' && REFUND.has(v.status)) { await refundOnce(rec.u, id, rec.price); refunded = true; await R('SREM', 'xpend', id); }
+    // FIX: kalau kode/OTP sudah masuk, tandai dan jangan pernah direfund
+    if (v.code && rec.kind !== 'sp') await R('SET', 'otpg:' + id, '1', 'EX', 2592000);
+    else if (rec.kind !== 'sp' && REFUND.has(v.status)) { refunded = await refundOnce(rec.u, id, rec.price); await R('SREM', 'xpend', id); }
     if (v.code && rec.kind !== 'sp') {
       if ((await R('SETNX', 'otpf:' + id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
       await R('SREM', 'xpend', id);
@@ -394,6 +407,16 @@ function makeExt(h) {
   async function cancel(u, id, reason, only) {
     const rec = await own(u, id, only);
     if (rec.kind === 'sp') throw fail(400, 'not_cancelable', 'Akun Shopee tidak bisa dibatalkan. Kirim komplain bila ada masalah');
+    /* Perbaikan: kalau OTP/kode sudah masuk, order dianggap selesai dan tidak boleh dibatalkan / direfund */
+    let got = null;
+    if (rec.kind === 'wa') {
+      const od = rows(await ditz('otpwa-orders'), 'orders').find((x) => String(x.id) === id) || {};
+      got = pick(od, ['code', 'otp', 'verification_code']);
+    } else {
+      const sd = await ditz('status', { id });
+      got = pick(sd, ['otp', 'code']);
+    }
+    if (got != null && low(got) !== 'waiting') { await R('SET', 'otpg:' + id, '1', 'EX', 2592000); throw fail(409, 'otp_received', 'OTP sudah masuk, order tidak bisa dibatalkan'); }
     if (rec.kind === 'wa') {
       const r = low(reason || 'changed_mind');
       if (!REASONS.includes(r)) throw fail(400, 'invalid_param', 'reason harus salah satu dari: ' + REASONS.join(', '));
@@ -451,6 +474,7 @@ function makeExt(h) {
       try {
         const rec = JSON.parse((await R('GET', 'xo:' + id)) || 'null');
         if (!rec) { await R('SREM', 'xpend', id); continue; }
+        if (await R('GET', 'otpg:' + id)) { await R('SREM', 'xpend', id); continue; }   // FIX: OTP sudah masuk
         let st = '', c = '';
         if (rec.kind === 'wa') {
           wl = wl || rows(await ditz('otpwa-orders'), 'orders');
@@ -461,10 +485,11 @@ function makeExt(h) {
           const d = await ditz('status', { id });
           st = low(d.status); c = d.otp && low(d.otp) !== 'waiting' ? d.otp : '';
         }
+        if (c) { await R('SET', 'otpg:' + id, '1', 'EX', 2592000); await R('SREM', 'xpend', id); continue; }   // FIX: cek OTP dulu sebelum refund
         if (REFUND.has(st)) {
           if (await refundOnce(rec.u, id, rec.price)) { refunded++; await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis'); }
           await R('SREM', 'xpend', id);
-        } else if (c) await R('SREM', 'xpend', id);
+        }
       } catch (e) { /* dicek lagi di jadwal berikutnya */ }
     }
     return { x_checked: ids.length, x_refunded: refunded };
@@ -475,7 +500,10 @@ function makeExt(h) {
 
 const X = makeExt({
   R, ditz, sell, bal, credit, feedPush, REFUND,
-  refundOnce: async (u, id, p) => ((await R('SETNX', 'ref:' + id, '1')) === 1 ? (await credit(u, p), true) : false),
+  refundOnce: async (u, id, p) => {
+    if (await R('GET', 'otpg:' + id)) return false;   // FIX: OTP sudah masuk, tidak boleh refund
+    return (await R('SETNX', 'ref:' + id, '1')) === 1 ? (await credit(u, p), true) : false;
+  },
   fail: (status, code, msg) => new HttpErr(status, msg)
 });
 
@@ -560,12 +588,16 @@ module.exports = async (req, res) => {
       case 'status': {
         const rec = await ownOrder(u, b.id);
         const d = await ditz('status', { id: b.id });
-        if (REFUND.has(String(d.status).toLowerCase())) await refundOnce(u, b.id, rec.price);
-        if (d.otp && String(d.otp).toLowerCase() !== 'waiting' && (await R('SETNX', 'otpf:' + b.id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
+        if (hasOtp(d)) await markOtp(b.id);   // FIX: OTP masuk = order selesai, tidak boleh direfund lagi
+        else if (REFUND.has(String(d.status).toLowerCase())) await refundOnce(u, b.id, rec.price);
+        if (hasOtp(d) && (await R('SETNX', 'otpf:' + b.id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
         return send(200, { ...d, balance: await bal(u) });
       }
       case 'cancel': {
         const rec = await ownOrder(u, b.id);
+        /* Perbaikan: kalau OTP sudah masuk, order dianggap selesai dan tidak boleh dibatalkan / direfund */
+        const cur = await ditz('status', { id: b.id });
+        if (hasOtp(cur)) { await markOtp(b.id); throw new HttpErr(409, 'OTP sudah masuk, order tidak bisa dibatalkan'); }
         const d = await ditz('cancel', { id: b.id });
         await refundOnce(u, b.id, rec.price);
         await feedPush('cancel', u, 'order dibatalkan, saldo kembali');
@@ -834,9 +866,11 @@ module.exports = async (req, res) => {
         await Promise.all(ids.map(async (id) => {
           try {
             if (await R('GET', 'ref:' + id)) return;
+            if (await R('GET', 'otpg:' + id)) return;   // FIX: OTP sudah masuk
             const rec = JSON.parse((await R('GET', 'ord:' + id)) || 'null');
             if (!rec || rec.u !== u) return;
             const d = await ditz('status', { id });
+            if (hasOtp(d)) { await markOtp(id); return; }   // FIX: cek OTP dulu sebelum refund
             if (REFUND.has(String(d.status).toLowerCase())) { if ((await R('SETNX', 'ref:' + id, '1')) === 1) { await credit(u, rec.price); refunded++; } }
           } catch (e) { /* lewati, dicek lagi nanti */ }
         }));
