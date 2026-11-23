@@ -37,10 +37,10 @@ ol,ul{padding-left:20px;margin:6px 0 10px}li{margin-bottom:4px}
 <body>
 <header class="w">
   <h1>Dokumentasi API v1</h1>
-  <p>Beli nomor virtual, OTP WhatsApp, akun Shopee siap pakai, serta nomor Telegram dan WhatsApp siap pakai, lalu isi saldo lewat HTTP. Semua transaksi memakai saldo akun SHOP DIGITECID milikmu sendiri.</p>
+  <p>Beli nomor virtual (Server 1 sampai 6) dan isi saldo lewat HTTP. Semua transaksi memakai saldo akun SHOP DIGITECID milikmu sendiri.</p>
   <div class="base"><span class="mut">Base URL</span><span class="pill" id="base"></span></div>
 </header>
-<nav><div class="w"><a href="#mulai">Mulai cepat</a><a href="#auth">Autentikasi</a><a href="#format">Format</a><a href="#limit">Batas</a><a href="#endpoint">Endpoint</a><a href="#layanan">Pilihan layanan</a><a href="#alur">Alur</a><a href="#error">Error</a><a href="#kode">Contoh kode</a></div></nav>
+<nav><div class="w"><a href="#mulai">Mulai cepat</a><a href="#auth">Autentikasi</a><a href="#format">Format</a><a href="#limit">Batas</a><a href="#endpoint">Endpoint</a><a href="#alur">Alur</a><a href="#error">Error</a><a href="#kode">Contoh kode</a></div></nav>
 <main class="w">
 
 <section id="mulai"><h2>Mulai cepat</h2>
@@ -62,20 +62,10 @@ Authorization: Bearer dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code
 
 { "ok": false, "error": { "code": "insufficient_balance", "message": "Saldo tidak cukup", "balance": 2000, "price": 3000 } }</code></pre>
 <h3>Idempotency-Key</h3>
-<p>Untuk semua <code>POST .../orders</code> (nomor virtual, OTP WhatsApp, Shopee, siap pakai) dan <code>POST /deposits</code> kamu bisa menambah header <code>Idempotency-Key</code> (8 sampai 64 karakter, huruf, angka, <code>-</code>, <code>_</code>). Kalau permintaan diulang dengan key yang sama dalam 24 jam, server mengembalikan hasil pertama tanpa memotong saldo lagi, dengan header <code>Idempotent-Replay: true</code>. Pakai ini supaya aman saat koneksi putus dan kamu mengulang permintaan.</p></section>
+<p>Untuk <code>POST /orders</code> dan <code>POST /deposits</code> kamu bisa menambah header <code>Idempotency-Key</code> (8 sampai 64 karakter, huruf, angka, <code>-</code>, <code>_</code>). Kalau permintaan diulang dengan key yang sama dalam 24 jam, server mengembalikan hasil pertama tanpa memotong saldo lagi, dengan header <code>Idempotent-Replay: true</code>. Pakai ini supaya aman saat koneksi putus dan kamu mengulang permintaan.</p></section>
 
 <section id="limit"><h2>Batas permintaan</h2>
 <p>Per API key: <b>60 permintaan per menit</b> untuk GET dan <b>20 per menit</b> untuk POST. Header <code>X-RateLimit-Limit</code> dan <code>X-RateLimit-Remaining</code> ada di setiap respons. Jika terlampaui, server membalas <code>429</code> dengan header <code>Retry-After</code> (detik). Jangan polling status lebih rapat dari 5 detik.</p></section>
-
-<section id="layanan"><h2>Pilihan layanan</h2>
-<p>Ada empat jenis layanan. Semuanya memotong saldo akun situs kamu dan memakai format respons yang sama.</p>
-<div class="card"><table><thead><tr><th>Jenis</th><th>Awalan endpoint</th><th>Cara kerja</th></tr></thead><tbody>
-<tr><td>Nomor Virtual (Server 1 sampai 6)</td><td><code>/countries</code>, <code>/services</code>, <code>/orders</code></td><td>Sewa nomor, OTP masuk ke nomor itu.</td></tr>
-<tr><td>OTP WhatsApp</td><td><code>/otpwa/...</code></td><td>Pilih aplikasi dan harga, tunggu nomor terisi, minta kode setelah aplikasi tujuan mengirimnya lewat WhatsApp.</td></tr>
-<tr><td>Shopee Siap Pakai</td><td><code>/shopee/...</code></td><td>Akun fresh. Nomor, password, dan email langsung ada. Kode login masuk ke email akun.</td></tr>
-<tr><td>Telegram dan WhatsApp Siap Pakai</td><td><code>/ready/...</code></td><td>Nomor sudah terdaftar. Kode dikirim lewat email dan muncul otomatis di order. Pilih lewat <code>app</code>: <code>telegram</code> atau <code>whatsapp</code>.</td></tr>
-</tbody></table></div>
-<div class="note">Di situs, empat jenis ini tampil sebagai kartu pilihan di menu Nokos, tepat di atas pilihan Server 1 sampai 6. Riwayat order OTP WhatsApp, Shopee, dan siap pakai ada di tombol <b>Riwayat siap pakai</b>.</div></section>
 
 <section id="endpoint"><h2>Endpoint</h2><div id="eps"></div></section>
 
@@ -85,22 +75,7 @@ Authorization: Bearer dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code
 <li><code>POST /orders</code>. Saldo langsung dipotong dan kamu menerima <code>number</code>. Nomor berlaku sekitar 20 menit (lihat <code>expires_at</code>).</li>
 <li>Pakai nomor itu di aplikasi tujuan, lalu polling <code>GET /orders/{id}</code> tiap 5 detik sampai <code>otp</code> berisi kode.</li>
 <li>Jika OTP tidak datang, panggil <code>POST /orders/{id}/cancel</code>. Order yang dibatalkan atau kedaluwarsa dikembalikan saldonya otomatis, hanya sekali.</li></ol>
-<div class="note">Setelah OTP masuk, order dianggap selesai dan saldo tidak dikembalikan. Nilai <code>status</code> diteruskan dari penyedia (contoh: <code>waiting</code>, <code>canceled</code>, <code>expired</code>). Anggap order sukses kalau <code>otp</code> tidak <code>null</code>.</div>
-<h3>OTP WhatsApp</h3>
-<ol><li><code>GET /otpwa/services</code> untuk memilih aplikasi dan harga.</li>
-<li><code>POST /otpwa/orders</code> dengan <code>service_id</code> dan <code>price</code> (harus persis salah satu harga di <code>offers</code>). Tambah <code>app_name</code> jika <code>free_name</code> true.</li>
-<li>Polling <code>GET /otpwa/orders/{id}</code> tiap 5 detik sampai <code>number</code> terisi. Masukkan nomor di aplikasi tujuan dan pilih kirim kode lewat WhatsApp.</li>
-<li><code>POST /otpwa/orders/{id}/code</code>, lalu polling <code>GET /otpwa/orders/{id}</code> sampai <code>code</code> terisi. Butuh kode baru? Panggil <code>/code</code> lagi.</li>
-<li>Batal sebelum kode masuk: <code>POST /otpwa/orders/{id}/cancel</code> dengan <code>reason</code>. Setelah kode terpakai, opsional <code>POST /otpwa/orders/{id}/confirm</code>.</li></ol>
-<h3>Shopee Siap Pakai</h3>
-<ol><li><code>GET /shopee/countries</code>, lalu <code>POST /shopee/orders</code> dengan <code>country</code>. Nomor, password, dan email ada di respons itu.</li>
-<li>Login Shopee memakai email akun. Ambil kode lewat <code>GET /shopee/orders/{id}</code> sampai <code>code</code> tidak <code>null</code>.</li>
-<li>Ada masalah? Kirim <code>POST /shopee/orders/{id}/complain</code>. Akun Shopee tidak bisa dibatalkan atau di-refund otomatis.</li></ol>
-<h3>Telegram dan WhatsApp Siap Pakai</h3>
-<ol><li><code>GET /ready/countries?app=telegram</code> (atau <code>whatsapp</code>), lalu <code>POST /ready/orders</code> dengan <code>app</code> dan <code>country</code>.</li>
-<li>Polling <code>GET /ready/orders/{id}</code> tiap 5 detik. Kode dikirim lewat email dan muncul otomatis di field <code>code</code>.</li>
-<li>Kode tidak masuk? <code>POST /ready/orders/{id}/cancel</code>. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.</li></ol>
-<div class="note">Di semua layanan, <code>refunded</code> bernilai <code>true</code> bila saldo sudah dikembalikan. Status <code>unknown</code> berarti data order belum terbaca dari penyedia; ulangi beberapa detik lagi. Daftar negara atau aplikasi bisa berubah sewaktu-waktu, jadi muat ulang sebelum beli.</div>
+<div class="note">Setelah OTP masuk, order dianggap selesai: saldo tidak dikembalikan dan <code>POST /orders/{id}/cancel</code> membalas <code>409 otp_received</code>. Nilai <code>status</code> diteruskan dari penyedia (contoh: <code>waiting</code>, <code>canceled</code>, <code>expired</code>). Anggap order sukses kalau <code>otp</code> tidak <code>null</code>. <code>refunded</code> bernilai <code>true</code> bila saldo sudah dikembalikan.</div>
 <h3>Isi saldo</h3>
 <ol><li><code>POST /deposits</code> dengan <code>nominal</code>. Jika <code>qr_link</code> berisi gambar (data URI), tampilkan.</li>
 <li>Jika <code>qr_link</code> adalah <code>null</code>, panggil <code>GET /deposits/{id}/qr</code>. Server membuka halaman bayar QRIS lalu mengambil screenshot-nya. Selama masih dibuat, respons berstatus <code>202</code> dengan <code>qr_pending: true</code>; ulangi tiap 5 detik sampai <code>qr_link</code> terisi. Proses biasanya memakan 10 sampai 60 detik.</li>
@@ -125,9 +100,8 @@ Image.open(io.BytesIO(raw)).crop((0, 222, 420, 562)).save('qr.png')</code></pre>
 <tr><td>401</td><td>invalid_api_key</td><td>Key tidak dikirim, salah, atau sudah dicabut.</td></tr>
 <tr><td>402</td><td>insufficient_balance</td><td>Saldo kurang. Respons memuat <code>balance</code> dan <code>price</code>.</td></tr>
 <tr><td>403</td><td>account_banned</td><td>Akun diblokir.</td></tr>
-<tr><td>404</td><td>not_found, service_unavailable</td><td>Endpoint, order, atau deposit tidak ada. Layanan tidak tersedia.</td></tr>
-<tr><td>409</td><td>out_of_stock, maintenance</td><td>Stok habis atau negara sedang maintenance. Saldo tidak terpotong.</td></tr>
-<tr><td>400</td><td>not_cancelable</td><td>Akun Shopee tidak bisa dibatalkan. Pakai komplain.</td></tr>
+<tr><td>404</td><td>not_found, service_unavailable</td><td>Endpoint, order, atau deposit tidak ada. Layanan tidak tersedia atau stok habis.</td></tr>
+<tr><td>409</td><td>otp_received</td><td>OTP sudah masuk, jadi order tidak bisa dibatalkan dan saldo tidak dikembalikan.</td></tr>
 <tr><td>409</td><td>request_in_progress</td><td>Idempotency-Key yang sama masih diproses.</td></tr>
 <tr><td>409</td><td>deposit_closed</td><td>Deposit sudah berhasil, batal, atau kedaluwarsa, jadi QR tidak dibuat. Respons memuat <code>status</code> dan <code>balance</code>.</td></tr>
 <tr><td>429</td><td>rate_limited</td><td>Terlalu banyak permintaan. Tunggu sesuai <code>retry_after</code>.</td></tr>
@@ -154,25 +128,7 @@ var EP=[
 ['POST','/orders','Buat order nomor. Saldo dipotong saat berhasil dibuat.',[['server','body','ya','1 sampai 6'],['country','body','ya','Kode negara'],['service','body','ya','id layanan dari /services'],['provider','body','tidak','provider dari /services, bila ada beberapa']],{server:'1',country:'ID',service:'wa'},{id:'ORD12345678',number:'6281234567890',status:'waiting',service:'WhatsApp',country:'ID',server:'1',price:3200,balance:21800,created_at:'2026-11-21T10:00:00.000Z',expires_at:'2026-11-21T10:20:00.000Z'},0,'Idempotency-Key'],
 ['GET','/orders','20 order terakhir yang dibuat lewat API.',[],null,{orders:[{id:'ORD12345678',service:'WhatsApp',country:'ID',server:'1',price:3200,created_at:'2026-11-21T10:00:00.000Z'}]}],
 ['GET','/orders/ORD12345678','Status order dan OTP. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.',[['id','path','ya','ID order']],null,{id:'ORD12345678',number:'6281234567890',status:'waiting',otp:null,price:3200,refunded:false,balance:21800}],
-['POST','/orders/ORD12345678/cancel','Batalkan order dan kembalikan saldo (sekali).',[['id','path','ya','ID order']],{},{id:'ORD12345678',status:'canceled',refunded:true,balance:25000}],
-['GET','/otpwa/services','Daftar aplikasi OTP WhatsApp beserta pilihan harga dan stok. free_name true berarti app_name wajib diisi saat beli.',[],null,{services:[{id:'41',name:'Shopee',free_name:false,offers:[{price:1342,stock:12},{price:990,stock:0}]},{id:'7',name:'Lainnya',free_name:true,offers:[{price:1100,stock:3}]}]},0,'OTP WhatsApp'],
-['POST','/otpwa/orders','Beli 1 kode OTP WhatsApp. price harus persis salah satu harga di offers. Maksimal 5 order berjalan. Saldo dipotong, dan dikembalikan bila penyedia menolak.',[['service_id','body','ya','id dari /otpwa/services'],['price','body','ya','Salah satu harga di offers'],['app_name','body','kondisional','Wajib jika free_name true (2 sampai 40 karakter)']],{service_id:'41',price:1342},{id:'b7d1e2f0-0000-0000-0000-000000000000',kind:'wa',name:'Shopee',status:'waiting',number:null,price_sell:1342,balance:23658},0,'Idempotency-Key'],
-['GET','/otpwa/orders','Order OTP WhatsApp terakhir milikmu.',[],null,{orders:[{id:'b7d1e2f0-...',kind:'wa',name:'Shopee',status:'waiting',number:'6281234567890',code:null,price:1342,created_at:'2026-11-22T10:00:00.000Z'}]}],
-['GET','/otpwa/orders/b7d1e2f0-...','Status order. Nomor terisi beberapa saat setelah beli. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.',[['id','path','ya','ID order']],null,{id:'b7d1e2f0-...',kind:'wa',name:'Shopee',status:'waiting',number:'6281234567890',code:null,price:1342,refunded:false,balance:23658}],
-['POST','/otpwa/orders/b7d1e2f0-.../code','Minta kode setelah aplikasi tujuan mengirimnya lewat WhatsApp. Panggil lagi untuk kode baru.',[['id','path','ya','ID order']],{},{id:'b7d1e2f0-...',status:'waiting',number:'6281234567890',code:null,refunded:false,balance:23658}],
-['POST','/otpwa/orders/b7d1e2f0-.../cancel','Batalkan order yang belum menerima kode dan kembalikan saldo (sekali).',[['id','path','ya','ID order'],['reason','body','tidak','registered, no_wa_option, atau changed_mind (bawaan changed_mind)']],{reason:'registered'},{id:'b7d1e2f0-...',kind:'wa',status:'canceled',refunded:true,balance:25000}],
-['POST','/otpwa/orders/b7d1e2f0-.../confirm','Opsional: tandai kode berhasil dipakai. Setelah itu kode tidak bisa dikirim ulang.',[['id','path','ya','ID order']],{},{id:'b7d1e2f0-...',kind:'wa',status:'confirmed',balance:23658}],
-['GET','/shopee/countries','Daftar negara untuk akun Shopee, harga, dan stok. on false berarti maintenance.',[],null,{countries:[{code:'ID',name:'Indonesia',flag:'',price:5500,stock:10,on:true}]},0,'Shopee'],
-['POST','/shopee/orders','Beli 1 akun Shopee. Saldo dipotong dan order langsung sukses. Nomor, password, dan email ada di respons ini, simpan segera.',[['country','body','ya','Kode negara dari /shopee/countries']],{country:'ID'},{id:'sp-0000-0000',kind:'sp',name:'Shopee Siap Pakai - Indonesia',number:'0812xxxxxxx',password:'********',email:'akun@contoh.com',price_sell:5500,balance:19500},0,'Idempotency-Key'],
-['GET','/shopee/orders','Riwayat akun Shopee milikmu beserta data akun.',[],null,{orders:[{id:'sp-0000-0000',kind:'sp',name:'Shopee Siap Pakai - Indonesia',status:'success',price:5500,email:'akun@contoh.com',password:'********',created_at:'2026-11-22T10:00:00.000Z'}]}],
-['GET','/shopee/orders/sp-0000-0000','Kode verifikasi terbaru di email akun. code null berarti belum ada. Berlaku 24 jam.',[['id','path','ya','ID order']],null,{id:'sp-0000-0000',kind:'sp',status:'success',code:null,price:5500,refunded:false,balance:19500}],
-['POST','/shopee/orders/sp-0000-0000/code','Sama seperti GET /shopee/orders/{id}: ambil kode email terbaru.',[['id','path','ya','ID order']],{},{id:'sp-0000-0000',kind:'sp',status:'success',code:'123456',price:5500,refunded:false,balance:19500}],
-['POST','/shopee/orders/sp-0000-0000/complain','Kirim komplain untuk akun Shopee. Akun Shopee tidak bisa dibatalkan. Lampiran gambar belum tersedia lewat API ini.',[['id','path','ya','ID order'],['message','body','ya','5 sampai 1000 karakter']],{message:'Akun tidak bisa login'},{id:'sp-0000-0000',sent:true}],
-['GET','/ready/countries?app=telegram','Daftar negara untuk Telegram atau WhatsApp siap pakai, harga, dan stok. on false berarti maintenance.',[['app','query','tidak','telegram (bawaan) atau whatsapp']],null,{app:'telegram',countries:[{code:'ID',name:'Indonesia',flag:'',price:3300,stock:4,on:true}]},0,'Siap pakai'],
-['POST','/ready/orders','Beli 1 nomor siap pakai. Kode dikirim lewat email dan muncul di field code pada order. Batalkan bila kode tidak masuk.',[['app','body','tidak','telegram (bawaan) atau whatsapp'],['country','body','ya','Kode negara dari /ready/countries']],{app:'telegram',country:'ID'},{id:'tg-0000-0000',kind:'tg',name:'Telegram Siap Pakai - Indonesia',status:'waiting',number:'62899xxxxxxx',price_sell:3300,balance:21700},0,'Idempotency-Key'],
-['GET','/ready/orders','Order Telegram dan WhatsApp siap pakai milikmu.',[],null,{orders:[{id:'tg-0000-0000',kind:'tg',name:'Telegram Siap Pakai - Indonesia',status:'unknown',number:null,code:null,price:3300,created_at:'2026-11-22T10:00:00.000Z'}]}],
-['GET','/ready/orders/tg-0000-0000','Cek kode masuk. Polling tiap 5 detik. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.',[['id','path','ya','ID order']],null,{id:'tg-0000-0000',kind:'tg',status:'success',number:'62899xxxxxxx',code:'12345',price:3300,refunded:false,balance:21700}],
-['POST','/ready/orders/tg-0000-0000/cancel','Batalkan order yang kodenya belum masuk dan kembalikan saldo (sekali).',[['id','path','ya','ID order']],{},{id:'tg-0000-0000',kind:'tg',status:'canceled',refunded:true,balance:25000}],
+['POST','/orders/ORD12345678/cancel','Batalkan order dan kembalikan saldo (sekali). Setelah OTP masuk, order tidak bisa dibatalkan (409 otp_received).',[['id','path','ya','ID order']],{},{id:'ORD12345678',status:'canceled',refunded:true,balance:25000}],
 ['POST','/deposits','Buat QRIS deposit. Nominal Rp 1.000 sampai Rp 5.000.000. Jika qr_link null, ambil gambar QR lewat GET /deposits/{id}/qr.',[['nominal','body','ya','Angka rupiah']],{nominal:10000},{id:'DEP123',nominal:10000,status:'pending',qr_link:'data:image/png;base64,...',pay_url:'https://...'},0,'Idempotency-Key'],
 ['GET','/deposits','Riwayat deposit terakhir dan saldo.',[],null,{deposits:[{id:'DEP123',nominal:10000,status:'berhasil',created_at:'2026-11-21 10:00:00'}],balance:35000}],
 ['GET','/deposits/DEP123','Status deposit. Saldo otomatis bertambah sekali saat status berhasil.',[['id','path','ya','ID deposit']],null,{id:'DEP123',nominal:10000,status:'berhasil',total_diterima:10000,balance:35000}],
@@ -183,7 +139,6 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp
 function pre(t){return '<pre><button class="cp" type="button">Salin</button><code>'+esc(t)+'</code></pre>'}
 document.getElementById('eps').innerHTML=EP.map(function(e){
   var rows=e[3].length?'<table><thead><tr><th>Parameter</th><th>Di</th><th>Wajib</th><th>Keterangan</th></tr></thead><tbody>'+e[3].map(function(r){return '<tr><td><code>'+r[0]+'</code></td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+esc(r[3])+'</td></tr>'}).join('')+'</tbody></table>':'';
-  var rq=e[0]+' '+e[1];
   var cmd=e[6]?'curl "'+BASE+e[1]+'"':curl(e[0],e[1],e[4]);
   return '<div class="card ep"><h3><span class="m '+e[0]+'">'+e[0]+'</span>'+esc(e[1].split('?')[0])+(e[6]?'<span class="tag">tanpa key</span>':'')+(e[7]?'<span class="tag">'+e[7]+'</span>':'')+'</h3><p class="mut">'+esc(e[2])+'</p>'+rows+'<h3 style="font-family:system-ui">Contoh permintaan</h3>'+pre(cmd)+'<h3 style="font-family:system-ui">Contoh respons</h3>'+pre(JSON.stringify({ok:true,data:e[5]},null,2))+'</div>';
 }).join('');
