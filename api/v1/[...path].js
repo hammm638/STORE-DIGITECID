@@ -1,6 +1,6 @@
 /* DIGITECID API v1 - endpoint publik. Auth: header X-API-Key. Saldo = saldo akun situs (Redis bal:<user>), bukan saldo ditznesia.
    Env Vercel: DITZ_APIKEY, UPSTASH_URL, UPSTASH_TOKEN (opsional: DITZ_MARKUP, SITESHOT_KEY)
-   QR deposit lewat screenshot (GET /deposits/{id}/qr) memakai key Site-Shot yang sama dengan situs: daftar 'shotkeys' di Redis, atau SITESHOT_KEY. */
+   QR deposit lewat screenshot (GET /deposits/{id}/qr) memakai daftar key Site-Shot (SHOT_KEYS di file ini, bergiliran), ditambah 'shotkeys' di Redis dan SITESHOT_KEY bila ada. */
 const crypto = require('crypto');
 const BASE = 'https://www.ditznesia.com/api/dev/';
 const E = (k) => process.env[k] || '';
@@ -140,6 +140,16 @@ async function inlineQr(d) {
 
 /* ---- QR lewat screenshot (Site-Shot): sama seperti di situs, hasilnya berbagi cache qrimg:<id> ---- */
 const SHOT_W = 420, SHOT_H = 620, SHOT_TOP = 222, SHOT_SHOW = 340;   // ukuran gambar dan bagian yang berisi QR (px)
+// Key Site-Shot: dipakai bergiliran (round-robin) di setiap pembuatan QR; kalau satu key ditolak/kuota habis, otomatis lanjut ke key berikutnya
+const SHOT_KEYS = [
+  '5TNOATCPJRLQZWWW4NUKDOTWPM',
+  '3BYBWIJ3SJ4VB5QIFQQRO7TJ2M',
+  '77ZXEAI7SKSVSVAJLDZ5G4MMDU',
+  'EZP5PL4P5HMFXOQBHGQBOQZ3OA',
+  'XWHXKORP46MFRKG7ZCWCU4HH5U',
+  'GEM7SJJ7XENYMSCXUQDVPU6FDY',
+  'DAANZMQSWVOOCZVF7ET5KSU6G4'
+];
 // Skrip ini dijalankan di dalam halaman pembayaran oleh Site-Shot (javascript_code)
 const QR_JS = `(function(){
   var n=0,lastClick=0;
@@ -164,14 +174,15 @@ const QR_JS = `(function(){
 })();`;
 
 async function shotKeys() {
+  let extra = [];
   try {
     const l = JSON.parse((await R('GET', 'shotkeys')) || '[]');
-    if (Array.isArray(l) && l.length) return l.map(String);
+    if (Array.isArray(l)) extra = l.map(String);
   } catch (e) {
-    /* pakai key bawaan dari env */
+    /* abaikan, pakai key di file */
   }
-  const k = E('SITESHOT_KEY');
-  return k ? [k] : [];
+  const env = E('SITESHOT_KEY');
+  return [...new Set([...SHOT_KEYS, ...extra, ...(env ? [env] : [])].map((k) => String(k).trim()).filter(Boolean))];
 }
 
 async function shotQr(id) {
@@ -194,7 +205,7 @@ async function shotQr(id) {
   try {
     const st = (await R('INCR', 'shotrr')) % keys.length;
 
-    for (let a = 0; a < Math.min(keys.length, 5); a++) {
+    for (let a = 0; a < Math.min(keys.length, 7); a++) {
       out = {};
       const key = keys[(st + a) % keys.length];
 
@@ -224,6 +235,10 @@ async function shotQr(id) {
           out.qr_err = 'Screenshot ditolak (429): kuota atau batas permintaan Site-Shot tercapai. ' +
             String(j.error || t || '').replace(/\s+/g, ' ').slice(0, 100);
           out.wait = 120;
+          out.retry = true;
+        } else if (r.status === 401 || r.status === 402 || r.status === 403) {
+          out.qr_err = 'Screenshot: key ditolak (HTTP ' + r.status + ') ' + String(j.error || '').slice(0, 80);
+          out.retry = true;
         } else if (j.error || !im) {
           out.qr_err = 'Screenshot: ' + String(j.error || ('HTTP ' + r.status)).slice(0, 100);
         } else {
@@ -234,13 +249,14 @@ async function shotQr(id) {
         out.qr_err = 'Gagal mengambil screenshot';
       }
 
-      // lanjut ke key berikutnya hanya jika kena 429
-      if (out.qr_link || !out.wait) break;
+      // lanjut ke key berikutnya hanya jika key ditolak atau kena batas (401/402/403/429)
+      if (out.qr_link || !out.retry) break;
     }
 
     // berhasil: simpan 1 jam. gagal: coba lagi setelah 30 detik (429: 2 menit)
     const ttl = out.qr_link ? 3600 : (out.wait || 30);
     delete out.wait;
+    delete out.retry;
     await R('SET', 'qrimg:' + id, JSON.stringify(out), 'EX', ttl);
   } finally {
     await R('DEL', 'qrlock:' + id);
@@ -586,6 +602,16 @@ function makeExt(h) {
   async function cancel(u, id, reason, only) {
     const rec = await own(u, id, only);
     if (rec.kind === 'sp') throw fail(400, 'not_cancelable', 'Akun Shopee tidak bisa dibatalkan. Kirim komplain bila ada masalah');
+    /* Kalau OTP/kode sudah masuk, order dianggap selesai dan tidak boleh dibatalkan / direfund */
+    let got = null;
+    if (rec.kind === 'wa') {
+      const od = rows(await ditz('otpwa-orders'), 'orders').find((x) => String(x.id) === id) || {};
+      got = pick(od, ['code', 'otp', 'verification_code']);
+    } else {
+      const sd = await ditz('status', { id });
+      got = pick(sd, ['otp', 'code']);
+    }
+    if (got != null && low(got) !== 'waiting') throw fail(409, 'otp_received', 'OTP sudah masuk, order tidak bisa dibatalkan');
     if (rec.kind === 'wa') {
       const r = low(reason || 'changed_mind');
       if (!REASONS.includes(r)) throw fail(400, 'invalid_param', 'reason harus salah satu dari: ' + REASONS.join(', '));
@@ -981,6 +1007,12 @@ module.exports = async (req, res) => {
 
       if (b && c === 'cancel' && m === 'POST') {
         const rec = await ownOrder(u, b);
+
+        /* Kalau OTP sudah masuk, order dianggap selesai dan tidak boleh dibatalkan / direfund */
+        const cur = await ditz('status', { id: b });
+        if (cur.otp && String(cur.otp).toLowerCase() !== 'waiting') {
+          throw new HttpErr(409, 'otp_received', 'OTP sudah masuk, order tidak bisa dibatalkan');
+        }
 
         await ditz('cancel', { id: b });
 
