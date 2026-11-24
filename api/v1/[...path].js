@@ -278,10 +278,11 @@ function pick(b) {
   if (!/^[A-Za-z0-9]{1,8}$/.test(country))
     throw new HttpErr(400, 'invalid_param', 'country tidak valid');
 
-  if (!/^[\w.\-]{1,40}$/.test(service))
+  // FIX: id layanan dari provider bisa berbentuk "wa|0.06", jadi karakter | ikut diizinkan
+  if (!/^[\w.\-|]{1,40}$/.test(service))
     throw new HttpErr(400, 'invalid_param', 'service tidak valid');
 
-  if (!/^[\w.\-]{0,40}$/.test(provider))
+  if (!/^[\w.\-|]{0,40}$/.test(provider))
     throw new HttpErr(400, 'invalid_param', 'provider tidak valid');
 
   return { server, country, service, provider };
