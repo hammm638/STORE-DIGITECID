@@ -52,10 +52,16 @@ async function ditz(path, params) {
   }
 
   if (!r.ok || (d && !Array.isArray(d) && d.detail)) {
+    // log lengkap ke Vercel Logs (tanpa apikey) supaya penyebab error penyedia kelihatan
+    console.error('[ditz]', path, JSON.stringify(params || {}), r.status, String(t).slice(0, 400));
+    const raw = d && (d.detail || d.error || d.message);
+    const why = raw
+      ? (typeof raw === 'string' ? raw : JSON.stringify(raw))
+      : 'HTTP ' + r.status + ' ' + String(t).replace(/\s+/g, ' ').slice(0, 120);
     throw new HttpErr(
       r.status >= 500 ? 502 : 400,
       'upstream_rejected',
-      (d && d.detail) || ('HTTP ' + r.status)
+      why.slice(0, 200)
     );
   }
 
