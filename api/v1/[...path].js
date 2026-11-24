@@ -762,8 +762,15 @@ module.exports = async (req, res) => {
       decodeURIComponent(String(value))
     );
 
-    const [a, b, c] = parts;
+    let [a, b, c] = parts;
     const m = req.method;
+
+    /* Bentuk datar (tanpa sub-path), untuk lingkungan yang hanya meneruskan 1 segmen:
+       /orders?id=X, /orders?id=X&action=cancel, /deposits?id=X, /deposits?id=X&action=qr|cancel */
+    if ((a === 'orders' || a === 'deposits') && !b && q.id) {
+      b = String(q.id);
+      c = q.action ? String(q.action) : undefined;
+    }
 
     if (a === 'ping' && m === 'GET' && !b) {
       return send(200, {
