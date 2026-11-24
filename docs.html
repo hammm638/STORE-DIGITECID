@@ -3,151 +3,202 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Dokumentasi API - SHOP DIGITECID</title>
+<title>Dokumentasi API v1 - SHOP DIGITECID</title>
+<meta name="description" content="API REST SHOP DIGITECID: beli nomor virtual server 1 sampai 6, terima OTP, dan deposit QRIS lewat HTTP.">
 <style>
-:root{--bg:#f4f7f5;--card:#fff;--ink:#0c1f1c;--mut:#5c6f69;--line:#dbe4df;--teal:#0b7a6c;--mint:#e3f5ee;--code:#0b0f0e;--codeink:#c9f5dc;--get:#1f7aec;--post:#0b7a6c;--err:#c8372d}
-@media(prefers-color-scheme:dark){:root{--bg:#0d1412;--card:#141d1a;--ink:#e8f3ef;--mut:#8fa59d;--line:#24322e;--teal:#3fd0b4;--mint:#173029;--code:#070a09;--get:#6aa8ff;--post:#3fd0b4;--err:#ff7b72}}
-*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:64px}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 40px}
-.w{max-width:860px;margin:0 auto;padding:0 16px}
-header{padding:28px 0 8px}h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}header p{margin:0;color:var(--mut)}
-.base{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
-.pill{font:13px ui-monospace,Menlo,Consolas,monospace;background:var(--mint);color:var(--teal);padding:6px 10px;border-radius:8px;word-break:break-all}
-nav{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 0;margin:14px 0 0}
-nav .w{display:flex;gap:8px;overflow-x:auto;white-space:nowrap}
-nav a{color:var(--ink);text-decoration:none;font-size:13px;font-weight:600;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
-section{margin-top:30px}h2{font-size:20px;margin:0 0 10px;letter-spacing:-.01em}h3{font-size:15px;margin:18px 0 6px}
+:root{--bg:#f5f8f6;--card:#fff;--ink:#10211d;--mut:#5a6e67;--line:#dbe5e0;--a:#0b7a6c;--mint:#e3f4ee;--code:#0a100e;--ci:#cdf3df;--get:#2563eb;--post:#0b7a6c;--err:#d23b30;--hero:#0c3a33}
+@media(prefers-color-scheme:dark){:root{--bg:#0a110f;--card:#121b18;--ink:#e8f3ef;--mut:#8da39b;--line:#22302c;--a:#3fd0b4;--mint:#15302a;--code:#050807;--get:#7db0ff;--post:#3fd0b4;--err:#ff7b72;--hero:#0e2a25}}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
+a{color:var(--a)}code,pre,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+code{font-size:.86em;background:var(--mint);color:var(--a);padding:1px 6px;border-radius:5px}
+.hero{background:var(--hero);color:#e8f6f1;padding:calc(34px + env(safe-area-inset-top,0px)) 16px 30px}
+.hero .in,.wrap{max-width:1040px;margin:0 auto}
+.hero h1{font-size:clamp(26px,5vw,38px);line-height:1.15;margin:0 0 10px;letter-spacing:-.02em}
+.hero p{margin:0 0 16px;max-width:60ch;color:#b6d8cf}
+.base{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{font:13px ui-monospace,Menlo,monospace;background:#06211c;border:1px solid #1d5a4f;color:#9ff0d6;padding:7px 11px;border-radius:8px;word-break:break-all}
+.btn{font:600 13px system-ui;border:1px solid #1d5a4f;background:#124a41;color:#e8f6f1;padding:8px 13px;border-radius:8px;cursor:pointer}
+.btn.pri{background:#3fd0b4;border-color:#3fd0b4;color:#04211b}
+.btn:focus-visible,summary:focus-visible,.tab:focus-visible,a:focus-visible{outline:2px solid #3fd0b4;outline-offset:2px}
+.lay{display:grid;grid-template-columns:200px 1fr;gap:28px;padding:0 16px}
+aside{position:sticky;top:0;align-self:start;padding:18px 0;max-height:100vh;overflow:auto}
+aside a{display:block;color:var(--mut);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line);font-size:14px}
+aside a:hover{color:var(--ink);border-color:var(--a)}
+main{min-width:0}
+section{padding-top:30px}h2{font-size:21px;margin:0 0 10px;letter-spacing:-.01em}h3{font-size:15px;margin:16px 0 6px}
 p{margin:0 0 10px}.mut{color:var(--mut)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
-code{font:13px ui-monospace,Menlo,Consolas,monospace;background:var(--mint);color:var(--teal);padding:1px 6px;border-radius:5px}
-pre{position:relative;margin:8px 0;background:var(--code);color:var(--codeink);border-radius:10px;padding:12px 14px;overflow-x:auto;font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:10px 0}
+.ai{border-color:var(--a);background:linear-gradient(0deg,var(--card),var(--card)) padding-box}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.row .btn{background:var(--mint);color:var(--a);border-color:var(--line)}.row .btn.pri{background:var(--a);color:var(--bg);border-color:var(--a)}
+pre{position:relative;margin:8px 0;background:var(--code);color:var(--ci);border-radius:10px;padding:13px 14px;overflow-x:auto;font-size:12.5px;line-height:1.55}
 pre code{background:none;color:inherit;padding:0;font-size:inherit}
-.cp{position:absolute;top:6px;right:6px;border:1px solid #2c3d37;background:#16201d;color:#9fd8c8;border-radius:6px;font-size:11px;padding:3px 8px;cursor:pointer}
+.cp{position:absolute;top:6px;right:6px;border:1px solid #2b3d37;background:#15201c;color:#9fd8c8;border-radius:6px;font:11px system-ui;padding:3px 8px;cursor:pointer}
 table{width:100%;border-collapse:collapse;font-size:13.5px;display:block;overflow-x:auto}
 th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mut);font-weight:600;white-space:nowrap}
-.m{display:inline-block;font:700 12px ui-monospace,monospace;padding:3px 8px;border-radius:6px;color:#fff;margin-right:8px}
-.m.GET{background:var(--get)}.m.POST{background:var(--post);color:#04211c}
-.ep h3{margin:0 0 6px;font:600 14.5px ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
-.tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut);margin-left:6px;font-family:system-ui}
-.note{border-left:3px solid var(--teal);background:var(--mint);padding:10px 12px;border-radius:0 8px 8px 0;font-size:14px;margin:10px 0}
-.warn{border-left-color:var(--err)}
-ol,ul{padding-left:20px;margin:6px 0 10px}li{margin-bottom:4px}
+.rules{margin:0;padding-left:20px}.rules li{margin-bottom:7px}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;counter-reset:s;margin:10px 0;padding:0;list-style:none}
+.flow li{counter-increment:s;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px}
+.flow li:before{content:counter(s);display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--a);color:var(--bg);font:700 12px system-ui;margin-right:8px}
+.flow b{display:block;margin:4px 0 2px}
+.note{border-left:3px solid var(--a);background:var(--mint);padding:10px 13px;border-radius:0 8px 8px 0;font-size:14px;margin:10px 0}.note.w{border-color:var(--err)}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:8px 0}
+details[open]{border-color:var(--a)}
+summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:11px 14px}
+summary::-webkit-details-marker{display:none}
+summary:after{content:"+";margin-left:auto;color:var(--mut);font-size:18px}details[open] summary:after{content:"\2212"}
+.m{font:700 11.5px ui-monospace,monospace;padding:3px 8px;border-radius:6px;color:#fff;background:var(--get);min-width:48px;text-align:center}.m.POST{background:var(--post);color:#04211b}
+.p{font:600 13.5px ui-monospace,Menlo,monospace;word-break:break-all}
+.sd{flex:1 1 220px;color:var(--mut);font-size:13px}
+.tag{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--mut)}
+.body{padding:0 14px 14px}
+.tabs{display:flex;gap:6px;margin-top:8px}.tab{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 14px;font:600 13px system-ui;cursor:pointer}.tab[aria-selected=true]{background:var(--a);color:var(--bg);border-color:var(--a)}
+@media(max-width:820px){.lay{grid-template-columns:1fr;gap:0}aside{position:sticky;top:0;z-index:5;background:var(--bg);display:flex;gap:6px;overflow-x:auto;padding:10px 0;border-bottom:1px solid var(--line);max-height:none}aside a{border:1px solid var(--line);border-radius:999px;white-space:nowrap;padding:5px 12px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
 <body>
-<header class="w">
-  <h1>Dokumentasi API v1</h1>
-  <p>Beli nomor virtual (Server 1 sampai 6) dan isi saldo lewat HTTP. Semua transaksi memakai saldo akun SHOP DIGITECID milikmu sendiri.</p>
-  <div class="base"><span class="mut">Base URL</span><span class="pill" id="base"></span></div>
-</header>
-<nav><div class="w"><a href="#mulai">Mulai cepat</a><a href="#auth">Autentikasi</a><a href="#format">Format</a><a href="#limit">Batas</a><a href="#endpoint">Endpoint</a><a href="#alur">Alur</a><a href="#error">Error</a><a href="#kode">Contoh kode</a></div></nav>
-<main class="w">
+<header class="hero"><div class="in">
+<h1>API SHOP DIGITECID v1</h1>
+<p>Beli nomor virtual (server 1 sampai 6), terima OTP, dan isi saldo lewat HTTP biasa. Semua transaksi memakai saldo akun situs milikmu. Respons selalu JSON.</p>
+<div class="base"><span class="pill" id="base"></span><button class="btn" data-copy="base">Salin URL</button><button class="btn pri" id="aiHero">Salin spesifikasi untuk AI</button></div>
+</div></header>
+
+<div class="wrap lay">
+<aside id="nav"><a href="#ai">Pakai dengan AI</a><a href="#mulai">Mulai cepat</a><a href="#aturan">Aturan penting</a><a href="#alur">Alur order</a></aside>
+<main>
+
+<section id="ai"><h2>Pakai dengan AI</h2>
+<div class="card ai"><p>Mau membuat bot atau situs dengan bantuan ChatGPT, Claude, atau AI lain? Salin spesifikasi di bawah dan tempel ke chat AI-nya. Isinya semua endpoint, parameter, aturan, dan format error, ditulis ringkas supaya AI tidak mengarang endpoint.</p>
+<div class="row"><button class="btn pri" id="aiSpec">Salin spesifikasi saja</button><button class="btn" id="aiPrompt">Salin prompt siap pakai</button></div>
+<p class="mut" style="margin:10px 0 0;font-size:13px">Prompt siap pakai = instruksi untuk AI + spesifikasi. Setelah ditempel, tulis apa yang kamu mau, misalnya "buatkan bot Telegram order nomor pakai Node.js".</p></div></section>
 
 <section id="mulai"><h2>Mulai cepat</h2>
-<div class="card"><ol>
-<li>Login ke situs, buka menu titik 3, pilih <b>API dan dokumentasi</b>, lalu buat API key.</li>
-<li>Isi saldo lewat menu Deposit di situs, atau lewat endpoint <code>POST /deposits</code>.</li>
-<li>Kirim permintaan dengan header <code>X-API-Key</code>.</li></ol>
-<pre><code id="qs"></code></pre></div></section>
+<div class="card"><ol class="rules"><li>Login ke situs, buka menu titik 3, pilih <b>API dan dokumentasi</b>, lalu buat API key.</li><li>Isi saldo lewat menu Deposit di situs atau <code>POST /deposits</code>.</li><li>Kirim permintaan dengan header <code>X-API-Key</code>.</li></ol>
+<pre><code id="qs"></code></pre>
+<p class="mut" style="margin:0;font-size:13.5px">Header alternatif: <code>Authorization: Bearer dtz_...</code>. Key hanya tampil sekali, server menyimpan hash-nya. Membuat key baru mematikan key lama. Jangan taruh key di front-end atau repositori publik.</p></div></section>
 
-<section id="auth"><h2>Autentikasi</h2>
-<p>Kirim API key di setiap permintaan, kecuali <code>/ping</code>. Dua cara yang diterima:</p>
-<pre><code>X-API-Key: dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-Authorization: Bearer dtz_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
-<div class="note warn">Key hanya tampil sekali saat dibuat, server hanya menyimpan hash-nya. Jangan taruh key di kode front-end atau repositori publik. Membuat key baru langsung mematikan key lama. Kalau bocor, ganti segera.</div></section>
+<section id="aturan"><h2>Aturan penting</h2>
+<div class="card"><ol class="rules" id="rules"></ol></div>
+<h3>Format respons</h3>
+<pre><code>Sukses: { "ok": true, "data": { ... } }
+Gagal : { "ok": false, "error": { "code": "insufficient_balance", "message": "Saldo tidak cukup", "balance": 2000, "price": 3000 } }</code></pre>
+<p class="mut">Batas per API key: 60 GET per menit dan 20 POST per menit. Header <code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code>, dan saat terlampaui <code>Retry-After</code> (detik, status 429).</p></section>
 
-<section id="format"><h2>Format respons</h2>
-<p>Semua respons berupa JSON. Sukses membawa <code>ok: true</code> dan isinya di <code>data</code>. Gagal membawa <code>ok: false</code> dan rincian di <code>error</code>.</p>
-<pre><code>{ "ok": true, "data": { "balance": 15000 } }
+<section id="alur"><h2>Alur order</h2>
+<h3>Beli nomor dan terima OTP</h3>
+<ol class="flow">
+<li><b>Pilih</b><code>GET /countries</code> lalu <code>GET /services</code>. Ambil <code>code</code> negara, serta <code>id</code> dan <code>provider</code> layanan.</li>
+<li><b>Order</b><code>POST /orders</code>. Saldo terpotong, kamu dapat <code>number</code> yang berlaku sekitar 20 menit.</li>
+<li><b>Tunggu OTP</b>Polling <code>GET /orders/{id}</code> tiap 5 detik sampai <code>otp</code> bukan <code>null</code>.</li>
+<li><b>Selesai atau batal</b>OTP tidak datang? <code>POST /orders/{id}/cancel</code>. Order batal atau kedaluwarsa dikembalikan otomatis, sekali saja.</li></ol>
+<div class="note">Setelah OTP masuk, order dianggap selesai: saldo tidak kembali dan cancel membalas <code>409 otp_received</code>. <code>status</code> diteruskan dari penyedia (<code>waiting</code>, <code>canceled</code>, <code>expired</code>). <code>refunded: true</code> berarti saldo sudah kembali.</div>
+<h3>Isi saldo QRIS</h3>
+<ol class="flow">
+<li><b>Buat</b><code>POST /deposits</code> dengan <code>nominal</code>. Kalau <code>qr_link</code> berisi gambar (data URI), tampilkan.</li>
+<li><b>Ambil QR</b>Kalau <code>qr_link</code> <code>null</code>, panggil <code>GET /deposits/{id}/qr</code>. Status <code>202</code> + <code>qr_pending</code> berarti ulangi tiap 5 detik (10 sampai 60 detik).</li>
+<li><b>Cadangan</b>Kalau tetap kosong dan <code>qr_error</code> terisi, buka <code>pay_url</code> di browser untuk bayar.</li>
+<li><b>Konfirmasi</b>Polling <code>GET /deposits/{id}</code> sampai <code>status</code> <code>berhasil</code>. Saldo bertambah otomatis satu kali.</li></ol>
+<div class="note">Gambar dari <code>/qr</code> adalah screenshot halaman bayar 420 x 620 piksel, bukan QR polos. Potong dari <code>crop.top</code> sepanjang <code>crop.height</code> piksel sebelum ditampilkan.</div>
+<pre><code>&lt;img src="DATA_URI" width="300" style="aspect-ratio:420/340;object-fit:cover;object-position:50% 79.29%"&gt;
 
-{ "ok": false, "error": { "code": "insufficient_balance", "message": "Saldo tidak cukup", "balance": 2000, "price": 3000 } }</code></pre>
-<h3>Idempotency-Key</h3>
-<p>Untuk <code>POST /orders</code> dan <code>POST /deposits</code> kamu bisa menambah header <code>Idempotency-Key</code> (8 sampai 64 karakter, huruf, angka, <code>-</code>, <code>_</code>). Kalau permintaan diulang dengan key yang sama dalam 24 jam, server mengembalikan hasil pertama tanpa memotong saldo lagi, dengan header <code>Idempotent-Replay: true</code>. Pakai ini supaya aman saat koneksi putus dan kamu mengulang permintaan.</p></section>
+# Python (Pillow)
+Image.open(io.BytesIO(base64.b64decode(qr_link.split(',',1)[1]))).crop((0,222,420,562)).save('qr.png')</code></pre></section>
 
-<section id="limit"><h2>Batas permintaan</h2>
-<p>Per API key: <b>60 permintaan per menit</b> untuk GET dan <b>20 per menit</b> untuk POST. Header <code>X-RateLimit-Limit</code> dan <code>X-RateLimit-Remaining</code> ada di setiap respons. Jika terlampaui, server membalas <code>429</code> dengan header <code>Retry-After</code> (detik). Jangan polling status lebih rapat dari 5 detik.</p></section>
-
-<section id="endpoint"><h2>Endpoint</h2><div id="eps"></div></section>
-
-<section id="alur"><h2>Alur yang disarankan</h2>
-<div class="card"><h3 style="margin-top:0">Order nomor dan OTP</h3>
-<ol><li><code>GET /countries</code> lalu <code>GET /services</code> untuk memilih negara, layanan, dan melihat harga.</li>
-<li><code>POST /orders</code>. Saldo langsung dipotong dan kamu menerima <code>number</code>. Nomor berlaku sekitar 20 menit (lihat <code>expires_at</code>).</li>
-<li>Pakai nomor itu di aplikasi tujuan, lalu polling <code>GET /orders/{id}</code> tiap 5 detik sampai <code>otp</code> berisi kode.</li>
-<li>Jika OTP tidak datang, panggil <code>POST /orders/{id}/cancel</code>. Order yang dibatalkan atau kedaluwarsa dikembalikan saldonya otomatis, hanya sekali.</li></ol>
-<div class="note">Setelah OTP masuk, order dianggap selesai: saldo tidak dikembalikan dan <code>POST /orders/{id}/cancel</code> membalas <code>409 otp_received</code>. Nilai <code>status</code> diteruskan dari penyedia (contoh: <code>waiting</code>, <code>canceled</code>, <code>expired</code>). Anggap order sukses kalau <code>otp</code> tidak <code>null</code>. <code>refunded</code> bernilai <code>true</code> bila saldo sudah dikembalikan.</div>
-<h3>Isi saldo</h3>
-<ol><li><code>POST /deposits</code> dengan <code>nominal</code>. Jika <code>qr_link</code> berisi gambar (data URI), tampilkan.</li>
-<li>Jika <code>qr_link</code> adalah <code>null</code>, panggil <code>GET /deposits/{id}/qr</code>. Server membuka halaman bayar QRIS lalu mengambil screenshot-nya. Selama masih dibuat, respons berstatus <code>202</code> dengan <code>qr_pending: true</code>; ulangi tiap 5 detik sampai <code>qr_link</code> terisi. Proses biasanya memakan 10 sampai 60 detik.</li>
-<li>Jika <code>qr_link</code> tetap <code>null</code> dan <code>qr_error</code> terisi, buka <code>pay_url</code> di browser untuk membayar lewat halaman pembayaran.</li>
-<li>Polling <code>GET /deposits/{id}</code> sampai <code>status</code> menjadi <code>berhasil</code>. Saldo bertambah otomatis satu kali.</li></ol>
-<div class="note">Gambar dari <code>/qr</code> adalah screenshot halaman bayar berukuran <code>width</code> x <code>height</code> (420 x 620 piksel), bukan QR polos. Bagian yang berisi QR dimulai dari <code>crop.top</code> sepanjang <code>crop.height</code> piksel. Potong gambarnya sebelum ditampilkan, seperti contoh di bawah. Setelah deposit berhasil, batal, atau kedaluwarsa, endpoint ini membalas <code>409 deposit_closed</code>.</div>
-<h3>Menampilkan QR dari screenshot</h3>
-<p class="mut">HTML: potong dengan CSS. Angka 79.29% berasal dari crop.top / (height - crop.height) = 222 / 280.</p>
-<pre><code>&lt;img src="DATA_URI_DARI_qr_link" width="300"
-     style="aspect-ratio:420/340;object-fit:cover;object-position:50% 79.29%"&gt;</code></pre>
-<p class="mut">Python: potong dengan Pillow.</p>
-<pre><code>import base64, io
-from PIL import Image
-
-raw = base64.b64decode(qr_link.split(',', 1)[1])
-Image.open(io.BytesIO(raw)).crop((0, 222, 420, 562)).save('qr.png')</code></pre></div></section>
+<section id="endpoint"><h2>Endpoint</h2><p class="mut">Ketuk satu endpoint untuk melihat parameter, contoh permintaan, dan contoh respons.</p><div id="eps"></div></section>
 
 <section id="error"><h2>Kode error</h2>
-<div class="card"><table><thead><tr><th>HTTP</th><th>code</th><th>Arti</th></tr></thead><tbody>
-<tr><td>400</td><td>invalid_param, invalid_json</td><td>Parameter atau body salah. Cek <code>message</code>.</td></tr>
-<tr><td>400</td><td>upstream_rejected</td><td>Penyedia menolak permintaan (misalnya stok habis). Saldo tidak terpotong.</td></tr>
-<tr><td>401</td><td>invalid_api_key</td><td>Key tidak dikirim, salah, atau sudah dicabut.</td></tr>
-<tr><td>402</td><td>insufficient_balance</td><td>Saldo kurang. Respons memuat <code>balance</code> dan <code>price</code>.</td></tr>
+<div class="card"><table><thead><tr><th>HTTP</th><th>code</th><th>Arti dan tindakan</th></tr></thead><tbody>
+<tr><td>400</td><td>invalid_param, invalid_json</td><td>Parameter atau body salah. Baca <code>message</code>.</td></tr>
+<tr><td>400</td><td>upstream_rejected</td><td>Penyedia menolak (misalnya stok habis). Saldo tidak terpotong.</td></tr>
+<tr><td>401</td><td>invalid_api_key</td><td>Key tidak dikirim, salah, atau dicabut.</td></tr>
+<tr><td>402</td><td>insufficient_balance</td><td>Saldo kurang. Respons memuat <code>balance</code> dan <code>price</code>. Minta user deposit.</td></tr>
 <tr><td>403</td><td>account_banned</td><td>Akun diblokir.</td></tr>
-<tr><td>404</td><td>not_found, service_unavailable</td><td>Endpoint, order, atau deposit tidak ada. Layanan tidak tersedia atau stok habis.</td></tr>
-<tr><td>409</td><td>otp_received</td><td>OTP sudah masuk, jadi order tidak bisa dibatalkan dan saldo tidak dikembalikan.</td></tr>
+<tr><td>404</td><td>not_found, service_unavailable</td><td>Endpoint, order, atau deposit tidak ada, atau layanan habis. Muat ulang daftar layanan.</td></tr>
+<tr><td>409</td><td>otp_received, out_of_stock, maintenance</td><td>OTP sudah masuk (tidak bisa cancel), stok habis, atau negara sedang maintenance.</td></tr>
 <tr><td>409</td><td>request_in_progress</td><td>Idempotency-Key yang sama masih diproses.</td></tr>
-<tr><td>409</td><td>deposit_closed</td><td>Deposit sudah berhasil, batal, atau kedaluwarsa, jadi QR tidak dibuat. Respons memuat <code>status</code> dan <code>balance</code>.</td></tr>
-<tr><td>429</td><td>rate_limited</td><td>Terlalu banyak permintaan. Tunggu sesuai <code>retry_after</code>.</td></tr>
-<tr><td>5xx</td><td>upstream_unreachable, upstream_invalid, database_error</td><td>Gangguan di sisi server atau penyedia. Aman diulang; kalau order gagal dibuat, saldo dikembalikan otomatis.</td></tr>
+<tr><td>409</td><td>deposit_closed</td><td>Deposit sudah berhasil, batal, atau kedaluwarsa. QR tidak dibuat.</td></tr>
+<tr><td>429</td><td>rate_limited</td><td>Tunggu sesuai <code>retry_after</code> detik.</td></tr>
+<tr><td>5xx</td><td>upstream_unreachable, upstream_invalid, database_error</td><td>Gangguan server atau penyedia. Aman diulang. Order yang gagal dibuat dikembalikan saldonya.</td></tr>
 </tbody></table></div></section>
 
-<section id="kode"><h2>Contoh kode</h2>
-<h3>JavaScript (Node 18+)</h3><pre><code id="js"></code></pre>
-<h3>Python</h3><pre><code id="py"></code></pre>
-<h3>PHP</h3><pre><code id="php"></code></pre></section>
-</main>
+<section id="kode"><h2>Contoh kode lengkap</h2><p class="mut">Order satu nomor lalu tunggu OTP. Kode ini mengambil layanan pertama dari daftar, ganti sesuai kebutuhan.</p>
+<div class="tabs" role="tablist"><button class="tab" role="tab" data-t="js" aria-selected="true">JavaScript</button><button class="tab" role="tab" data-t="py" aria-selected="false">Python</button><button class="tab" role="tab" data-t="php" aria-selected="false">PHP</button></div>
+<pre id="js"><code></code></pre><pre id="py" hidden><code></code></pre><pre id="php" hidden><code></code></pre></section>
+</main></div>
+
 <script>
 (function(){
-var BASE=location.origin.indexOf('http')===0?location.origin+'/api/v1':'https://DOMAINMU/api/v1';
-document.getElementById('base').textContent=BASE;
-var KEY='dtz_KEY_KAMU';
-function curl(m,p,b){return 'curl'+(m==='POST'?' -X POST':'')+' "'+BASE+p+'" \\\n  -H "X-API-Key: '+KEY+'"'+(b?' \\\n  -H "Content-Type: application/json" \\\n  -d \''+JSON.stringify(b)+'\'':'')}
+var BASE=location.origin.indexOf('http')===0?location.origin+'/api/v1':'https://DOMAINMU/api/v1',KEY='dtz_KEY_KAMU',ID='ORD12345678';
+var $=function(i){return document.getElementById(i)};
+$('base').textContent=BASE;
+var RULES=[
+'Semua harga dan saldo berupa bilangan bulat rupiah. Saldo dipotong saat order berhasil dibuat. Kalau pembuatan order gagal, saldo otomatis kembali.',
+'<code>service</code> di <code>POST /orders</code> harus sama persis dengan <code>id</code> dari <code>GET /services</code>. Id bisa memuat karakter <code>|</code> atau <code>.</code>, contoh <code>wa|0.06</code>. Jangan diubah, jangan diganti nama tampilan seperti "WhatsApp". Kirim juga <code>provider</code> dari daftar itu kalau ada.',
+'<code>country</code> adalah kode dari <code>GET /countries</code> (contoh <code>ID</code>), bukan nama negara. <code>server</code> berisi 1 sampai 6.',
+'Order nomor sukses kalau <code>otp</code> tidak <code>null</code>. Polling status tiap 5 detik atau lebih, jangan lebih rapat.',
+'Setelah OTP masuk, order tidak bisa dibatalkan dan saldo tidak kembali (409 otp_received).',
+'Kirim header <code>Idempotency-Key</code> unik (8 sampai 64 karakter: huruf, angka, <code>-</code>, <code>_</code>) di <code>POST /orders</code> dan <code>POST /deposits</code>. Kalau koneksi putus, ulangi dengan key yang sama dalam 24 jam: server mengembalikan hasil pertama tanpa memotong saldo lagi (header <code>Idempotent-Replay: true</code>).',
+'Bentuk alternatif untuk klien yang hanya bisa satu segmen path: <code>/orders?id=ID&amp;action=cancel</code>, <code>/deposits?id=ID&amp;action=qr</code> atau <code>action=cancel</code>.',
+'Simpan API key di server atau file konfigurasi, bukan di kode yang dibaca publik.'];
+$('rules').innerHTML=RULES.map(function(r){return '<li>'+r+'</li>'}).join('');
+var G=[['akun','Akun'],['nomor','Nomor virtual'],['deposit','Deposit QRIS']];
+function E(g,m,p,d,pa,rq,rs,x){return{g:g,m:m,p:p,d:d,pa:pa||[],rq:rq,rs:rs,x:x}}
+var O={id:ID,number:'6281234567890',status:'waiting',price:1749,balance:21800};
+var S={id:'wa|0.06',name:'WhatsApp',provider:'p1',price:1749,stock:120};
 var EP=[
-['GET','/ping','Cek layanan hidup. Tidak butuh API key.',[],null,{service:'digitecid-api',version:'v1',time:'2026-11-21T10:00:00.000Z'},1],
-['GET','/me','Info key dan saldo akun.',[],null,{balance:25000,key_prefix:'dtz_a1b2c3',key_created_at:'2026-11-21T09:00:00.000Z'}],
-['GET','/balance','Saldo akun situs kamu (rupiah).',[],null,{balance:25000}],
-['GET','/countries?server=1','Daftar negara per server.',[['server','query','tidak','1 sampai 6, bawaan 1']],null,{server:'1',countries:[{code:'ID',name:'Indonesia'},{code:'US',name:'United States'}]}],
-['GET','/services?server=1&country=ID','Daftar layanan dan harga untuk satu negara.',[['server','query','ya','1 sampai 6'],['country','query','ya','Kode negara dari /countries'],['service','query','tidak','Saring satu layanan']],null,{server:'1',country:'ID',services:[{id:'wa',name:'WhatsApp',provider:'p1',price:3200}]}],
-['POST','/orders','Buat order nomor. Saldo dipotong saat berhasil dibuat.',[['server','body','ya','1 sampai 6'],['country','body','ya','Kode negara'],['service','body','ya','id layanan dari /services'],['provider','body','tidak','provider dari /services, bila ada beberapa']],{server:'1',country:'ID',service:'wa'},{id:'ORD12345678',number:'6281234567890',status:'waiting',service:'WhatsApp',country:'ID',server:'1',price:3200,balance:21800,created_at:'2026-11-21T10:00:00.000Z',expires_at:'2026-11-21T10:20:00.000Z'},0,'Idempotency-Key'],
-['GET','/orders','20 order terakhir yang dibuat lewat API.',[],null,{orders:[{id:'ORD12345678',service:'WhatsApp',country:'ID',server:'1',price:3200,created_at:'2026-11-21T10:00:00.000Z'}]}],
-['GET','/orders/ORD12345678','Status order dan OTP. Order batal atau kedaluwarsa dikembalikan saldonya otomatis.',[['id','path','ya','ID order']],null,{id:'ORD12345678',number:'6281234567890',status:'waiting',otp:null,price:3200,refunded:false,balance:21800}],
-['POST','/orders/ORD12345678/cancel','Batalkan order dan kembalikan saldo (sekali). Setelah OTP masuk, order tidak bisa dibatalkan (409 otp_received).',[['id','path','ya','ID order']],{},{id:'ORD12345678',status:'canceled',refunded:true,balance:25000}],
-['POST','/deposits','Buat QRIS deposit. Nominal Rp 1.000 sampai Rp 5.000.000. Jika qr_link null, ambil gambar QR lewat GET /deposits/{id}/qr.',[['nominal','body','ya','Angka rupiah']],{nominal:10000},{id:'DEP123',nominal:10000,status:'pending',qr_link:'data:image/png;base64,...',pay_url:'https://...'},0,'Idempotency-Key'],
-['GET','/deposits','Riwayat deposit terakhir dan saldo.',[],null,{deposits:[{id:'DEP123',nominal:10000,status:'berhasil',created_at:'2026-11-21 10:00:00'}],balance:35000}],
-['GET','/deposits/DEP123','Status deposit. Saldo otomatis bertambah sekali saat status berhasil.',[['id','path','ya','ID deposit']],null,{id:'DEP123',nominal:10000,status:'berhasil',total_diterima:10000,balance:35000}],
-['GET','/deposits/DEP123/qr','Ambil gambar QR deposit lewat screenshot halaman bayar QRIS. Hasil disimpan 1 jam. Saat masih dibuat, server membalas 202 dengan qr_pending true: ulangi tiap 5 detik. Jika gagal, qr_link null, qr_error berisi alasan, dan pay_url (halaman bayar) dikirim sebagai cadangan.',[['id','path','ya','ID deposit yang masih menunggu pembayaran']],null,{id:'DEP123',status:'pending',qr_link:'data:image/png;base64,...',source:'screenshot',width:420,height:620,crop:{top:222,height:340},balance:25000}],
-['POST','/deposits/DEP123/cancel','Batalkan deposit yang belum dibayar.',[['id','path','ya','ID deposit']],{},{id:'DEP123',status:'batal',balance:25000}]
-];
-function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+E('akun','GET','/ping','Cek layanan hidup. Satu-satunya endpoint tanpa API key.',0,0,{service:'digitecid-api',version:'v1',time:'2026-11-24T10:00:00.000Z'},'tanpa key'),
+E('akun','GET','/me','Info API key dan saldo.',0,0,{balance:25000,key_prefix:'dtz_a1b2c3',key_created_at:'2026-11-24T09:00:00.000Z'}),
+E('akun','GET','/balance','Saldo akun situs dalam rupiah.',0,0,{balance:25000}),
+E('nomor','GET','/countries?server=1','Daftar negara per server. Pakai field code di langkah berikutnya.',['server~query~tidak~1 sampai 6, bawaan 1'],0,{server:'1',countries:[{code:'ID',name:'Indonesia'}]}),
+E('nomor','GET','/services?server=1&country=ID','Daftar layanan dan harga untuk satu negara. Simpan id dan provider persis seperti diterima.',['server~query~ya~1 sampai 6','country~query~ya~Kode dari /countries','service~query~tidak~Saring satu layanan'],0,{server:'1',country:'ID',services:[S]}),
+E('nomor','POST','/orders','Buat order nomor. Saldo dipotong saat order berhasil dibuat.',['server~body~ya~1 sampai 6','country~body~ya~Kode negara','service~body~ya~id dari /services, persis','provider~body~tidak~provider dari /services, bila ada'],{server:'1',country:'ID',service:'wa|0.06',provider:'p1'},{id:ID,number:'6281234567890',status:'waiting',service:'WhatsApp',country:'ID',server:'1',price:1749,balance:21800,created_at:'2026-11-24T10:00:00.000Z',expires_at:'2026-11-24T10:20:00.000Z'},'Idempotency-Key'),
+E('nomor','GET','/orders','20 order terakhir lewat API.',0,0,{orders:[{id:ID,service:'WhatsApp',country:'ID',server:'1',price:1749,created_at:'2026-11-24T10:00:00.000Z'}]}),
+E('nomor','GET','/orders/{id}','Status order dan OTP. Order batal atau kedaluwarsa otomatis dikembalikan saldonya.',['id~path~ya~ID order'],0,{id:ID,number:'6281234567890',status:'waiting',otp:null,price:1749,refunded:false,balance:21800}),
+E('nomor','POST','/orders/{id}/cancel','Batalkan order dan kembalikan saldo (sekali). Gagal 409 otp_received jika OTP sudah masuk.',['id~path~ya~ID order'],{},{id:ID,status:'canceled',refunded:true,balance:23549}),
+E('deposit','POST','/deposits','Buat QRIS deposit, Rp 1.000 sampai Rp 5.000.000. Kalau qr_link null, ambil lewat /deposits/{id}/qr.',['nominal~body~ya~Rupiah, bilangan bulat'],{nominal:10000},{id:'DEP123',nominal:10000,status:'pending',qr_link:'data:image/png;base64,...',pay_url:'https://app.midtrans.com/...'},'Idempotency-Key'),
+E('deposit','GET','/deposits','Riwayat deposit terakhir dan saldo.',0,0,{deposits:[{id:'DEP123',nominal:10000,status:'berhasil',created_at:'2026-11-24 10:00:00'}],balance:35000}),
+E('deposit','GET','/deposits/{id}','Status deposit. Saldo bertambah otomatis satu kali saat status berhasil.',['id~path~ya~ID deposit'],0,{id:'DEP123',nominal:10000,status:'berhasil',total_diterima:10000,balance:35000}),
+E('deposit','GET','/deposits/{id}/qr','Ambil gambar QR lewat screenshot halaman bayar. Disimpan 1 jam. 202 + qr_pending berarti ulangi tiap 5 detik. Kalau gagal: qr_link null, qr_error dan pay_url terisi.',['id~path~ya~ID deposit yang menunggu bayar'],0,{id:'DEP123',status:'pending',qr_link:'data:image/png;base64,...',source:'screenshot',width:420,height:620,crop:{top:222,height:340},balance:25000}),
+E('deposit','POST','/deposits/{id}/cancel','Batalkan deposit yang belum dibayar.',['id~path~ya~ID deposit'],{},{id:'DEP123',status:'batal',balance:25000})];
+function J(o){return JSON.stringify(o,null,2)}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function plain(h){return h.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&')}
+function curl(e){var p=e.p.replace('{id}','ID_ORDER');return 'curl'+(e.m==='POST'?' -X POST':'')+' "'+BASE+p+'" \\\n  -H "X-API-Key: '+KEY+'"'+(e.x==='Idempotency-Key'?' \\\n  -H "Idempotency-Key: '+'$(uuidgen)"':'')+(e.rq?' \\\n  -H "Content-Type: application/json" \\\n  -d \''+JSON.stringify(e.rq)+'\'':'')}
 function pre(t){return '<pre><button class="cp" type="button">Salin</button><code>'+esc(t)+'</code></pre>'}
-document.getElementById('eps').innerHTML=EP.map(function(e){
-  var rows=e[3].length?'<table><thead><tr><th>Parameter</th><th>Di</th><th>Wajib</th><th>Keterangan</th></tr></thead><tbody>'+e[3].map(function(r){return '<tr><td><code>'+r[0]+'</code></td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+esc(r[3])+'</td></tr>'}).join('')+'</tbody></table>':'';
-  var cmd=e[6]?'curl "'+BASE+e[1]+'"':curl(e[0],e[1],e[4]);
-  return '<div class="card ep"><h3><span class="m '+e[0]+'">'+e[0]+'</span>'+esc(e[1].split('?')[0])+(e[6]?'<span class="tag">tanpa key</span>':'')+(e[7]?'<span class="tag">'+e[7]+'</span>':'')+'</h3><p class="mut">'+esc(e[2])+'</p>'+rows+'<h3 style="font-family:system-ui">Contoh permintaan</h3>'+pre(cmd)+'<h3 style="font-family:system-ui">Contoh respons</h3>'+pre(JSON.stringify({ok:true,data:e[5]},null,2))+'</div>';
-}).join('');
-document.getElementById('qs').textContent=curl('GET','/balance')+'\n\n'+curl('POST','/orders',{server:'1',country:'ID',service:'wa'});
-document.getElementById('js').textContent="const BASE = '"+BASE+"';\nconst KEY = process.env.DTZ_KEY;\n\nasync function api(method, path, body) {\n  const r = await fetch(BASE + path, {\n    method,\n    headers: { 'X-API-Key': KEY, 'Content-Type': 'application/json',\n               'Idempotency-Key': method === 'POST' ? crypto.randomUUID() : undefined },\n    body: body ? JSON.stringify(body) : undefined,\n  });\n  const j = await r.json();\n  if (!j.ok) throw new Error(j.error.code + ': ' + j.error.message);\n  return j.data;\n}\n\nconst order = await api('POST', '/orders', { server: '1', country: 'ID', service: 'wa' });\nconsole.log('Nomor:', order.number);\n\nlet otp = null;\nwhile (!otp) {\n  await new Promise((r) => setTimeout(r, 5000));\n  const s = await api('GET', '/orders/' + order.id);\n  otp = s.otp;\n  if (s.refunded) throw new Error('Order ' + s.status);\n}\nconsole.log('OTP:', otp);";
-document.getElementById('py').textContent="import os, time, uuid, requests\n\nBASE = '"+BASE+"'\nH = {'X-API-Key': os.environ['DTZ_KEY']}\n\ndef api(method, path, body=None):\n    h = dict(H)\n    if method == 'POST':\n        h['Idempotency-Key'] = str(uuid.uuid4())\n    j = requests.request(method, BASE + path, headers=h, json=body, timeout=30).json()\n    if not j['ok']:\n        raise RuntimeError(j['error']['code'] + ': ' + j['error']['message'])\n    return j['data']\n\norder = api('POST', '/orders', {'server': '1', 'country': 'ID', 'service': 'wa'})\nprint('Nomor:', order['number'])\n\nwhile True:\n    time.sleep(5)\n    s = api('GET', '/orders/' + order['id'])\n    if s['otp']:\n        print('OTP:', s['otp'])\n        break\n    if s['refunded']:\n        raise SystemExit('Order ' + s['status'])";
-document.getElementById('php').textContent="<?php\n$base = '"+BASE+"';\n$key = getenv('DTZ_KEY');\n\nfunction api($method, $path, $body = null) {\n    global $base, $key;\n    $h = ['X-API-Key: ' . $key, 'Content-Type: application/json'];\n    if ($method === 'POST') $h[] = 'Idempotency-Key: ' . bin2hex(random_bytes(16));\n    $ch = curl_init($base . $path);\n    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method,\n        CURLOPT_HTTPHEADER => $h, CURLOPT_TIMEOUT => 30]);\n    if ($body) curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));\n    $j = json_decode(curl_exec($ch), true);\n    if (empty($j['ok'])) throw new Exception($j['error']['code'] . ': ' . $j['error']['message']);\n    return $j['data'];\n}\n\n$order = api('POST', '/orders', ['server' => '1', 'country' => 'ID', 'service' => 'wa']);\necho 'Nomor: ' . $order['number'] . PHP_EOL;\ndo {\n    sleep(5);\n    $s = api('GET', '/orders/' . $order['id']);\n} while (!$s['otp'] && !$s['refunded']);\necho 'OTP: ' . ($s['otp'] ?? 'tidak masuk, saldo dikembalikan') . PHP_EOL;";
-document.addEventListener('click',function(e){var b=e.target.closest('.cp');if(!b)return;var t=b.parentNode.querySelector('code').textContent;try{navigator.clipboard.writeText(t)}catch(x){}b.textContent='Tersalin';setTimeout(function(){b.textContent='Salin'},1400)});
-document.querySelectorAll('pre:not(:has(.cp))').forEach(function(p){var b=document.createElement('button');b.className='cp';b.type='button';b.textContent='Salin';p.insertBefore(b,p.firstChild)});
+$('nav').insertAdjacentHTML('beforeend',G.map(function(g){return '<a href="#g-'+g[0]+'">'+g[1]+'</a>'}).join('')+'<a href="#error">Kode error</a><a href="#kode">Contoh kode</a>');
+$('eps').innerHTML=G.map(function(g){
+  return '<h3 id="g-'+g[0]+'" style="margin-top:22px;font-size:17px">'+g[1]+'</h3>'+EP.filter(function(e){return e.g===g[0]}).map(function(e){
+    var t=e.pa.length?'<table><thead><tr><th>Parameter</th><th>Di</th><th>Wajib</th><th>Keterangan</th></tr></thead><tbody>'+e.pa.map(function(r){r=r.split('~');return '<tr><td><code>'+r[0]+'</code></td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>'+esc(r[3])+'</td></tr>'}).join('')+'</tbody></table>':'';
+    return '<details><summary><span class="m '+e.m+'">'+e.m+'</span><span class="p">'+esc(e.p.split('?')[0])+'</span>'+(e.x?'<span class="tag">'+e.x+'</span>':'')+'<span class="sd">'+esc(e.d.split('. ')[0].replace(/\.$/,''))+'</span></summary><div class="body"><p>'+esc(e.d)+'</p>'+t+'<h3>Contoh permintaan</h3>'+pre(e.x==='tanpa key'?'curl "'+BASE+e.p+'"':curl(e))+'<h3>Contoh respons</h3>'+pre(J({ok:true,data:e.rs}))+'</div></details>'}).join('')}).join('');
+$('qs').textContent=curl(EP[2])+'\n\n'+curl(EP[5]);
+function spec(){
+  var s=['SPESIFIKASI API SHOP DIGITECID v1','Base URL: '+BASE,'Autentikasi: header X-API-Key: dtz_... di semua endpoint kecuali /ping (atau Authorization: Bearer dtz_...).','Respons sukses: {"ok":true,"data":{...}}. Gagal: {"ok":false,"error":{"code":"...","message":"..."}}. Semua JSON.','Batas: 60 GET/menit dan 20 POST/menit per key.','','ATURAN (wajib dipatuhi):'];
+  RULES.forEach(function(r,i){s.push((i+1)+'. '+plain(r))});
+  s.push('','ENDPOINT (format: METHOD path | fungsi | parameter nama(lokasi,wajib?) | contoh body):');
+  EP.forEach(function(e){s.push(e.m+' '+e.p+' | '+e.d+' | '+(e.pa.length?e.pa.map(function(r){r=r.split('~');return r[0]+'('+r[1]+','+r[2]+')'}).join(', '):'tanpa parameter')+(e.rq&&Object.keys(e.rq).length?' | body: '+JSON.stringify(e.rq):'')+(e.x==='Idempotency-Key'?' | pakai header Idempotency-Key':''))});
+  s.push('','CONTOH RESPONS:');
+  [4,5,7,9].forEach(function(i){s.push(EP[i].m+' '+EP[i].p+' => '+JSON.stringify({ok:true,data:EP[i].rs}))});
+  s.push('','KODE ERROR: 400 invalid_param/invalid_json/upstream_rejected; 401 invalid_api_key; 402 insufficient_balance (ada balance dan price); 403 account_banned; 404 not_found/service_unavailable; 409 otp_received/out_of_stock/maintenance/request_in_progress/deposit_closed; 429 rate_limited (retry_after detik); 5xx gangguan server, aman diulang.');
+  return s.join('\n')}
+var PROMPT='Kamu developer senior. Bantu aku membuat aplikasi memakai API di bawah ini. Patuhi bagian ATURAN. Pakai hanya endpoint dan field yang tertulis, jangan mengarang. Simpan API key di file konfigurasi, bukan di kode publik. Tangani error berdasarkan field error.code. Kalau ada yang kurang jelas, tanya dulu sebelum menulis kode.\n\n';
+function flash(b,t){var o=b.textContent;b.textContent=t||'Tersalin';setTimeout(function(){b.textContent=o},1500)}
+function legacy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.cssText='position:fixed;top:0;left:0;opacity:0';document.body.appendChild(a);a.focus();a.select();a.setSelectionRange(0,t.length);var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+function copy(t,b,m){
+  var done=function(){flash(b,m)},fail=function(){if(legacy(t))done();else flash(b,'Gagal salin')};
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,fail)}else fail()}
+$('aiHero').onclick=$('aiSpec').onclick=function(){copy(spec(),this,'Spesifikasi tersalin')};
+$('aiPrompt').onclick=function(){copy(PROMPT+spec(),this,'Prompt tersalin')};
+document.addEventListener('click',function(e){
+  var c=e.target.closest('.cp');if(c){copy(c.parentNode.querySelector('code').textContent,c);return}
+  var d=e.target.closest('[data-copy]');if(d){copy($(d.dataset.copy).textContent,d);return}
+  var t=e.target.closest('.tab');if(t){document.querySelectorAll('.tab').forEach(function(x){x.setAttribute('aria-selected',x===t)});['js','py','php'].forEach(function(k){$(k).hidden=k!==t.dataset.t})}});
+document.querySelectorAll('#qs').forEach(function(c){var p=c.parentNode,b=document.createElement('button');b.className='cp';b.type='button';b.textContent='Salin';p.insertBefore(b,c)});
+var JS=["const BASE = '"+BASE+"';","const KEY = process.env.DTZ_KEY;","","async function api(method, path, body) {","  const headers = { 'X-API-Key': KEY, 'Content-Type': 'application/json' };","  if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();","  const r = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });","  const j = await r.json();","  if (!j.ok) throw new Error(j.error.code + ': ' + j.error.message);","  return j.data;","}","","const { services } = await api('GET', '/services?server=1&country=ID');","const svc = services[0]; // kirim id dan provider persis seperti diterima","const order = await api('POST', '/orders', {","  server: '1', country: 'ID', service: svc.id, provider: svc.provider,","});","console.log('Nomor:', order.number);","","let otp = null;","while (!otp) {","  await new Promise((r) => setTimeout(r, 5000));","  const s = await api('GET', '/orders/' + order.id);","  otp = s.otp;","  if (s.refunded) throw new Error('Order ' + s.status);","}","console.log('OTP:', otp);"];
+var PY=["import os, time, uuid, requests","","BASE = '"+BASE+"'","","def api(method, path, body=None):","    h = {'X-API-Key': os.environ['DTZ_KEY']}","    if method == 'POST':","        h['Idempotency-Key'] = str(uuid.uuid4())","    j = requests.request(method, BASE + path, headers=h, json=body, timeout=30).json()","    if not j['ok']:","        raise RuntimeError(j['error']['code'] + ': ' + j['error']['message'])","    return j['data']","","svc = api('GET', '/services?server=1&country=ID')['services'][0]","order = api('POST', '/orders', {'server': '1', 'country': 'ID',","                                'service': svc['id'], 'provider': svc.get('provider')})","print('Nomor:', order['number'])","","while True:","    time.sleep(5)","    s = api('GET', '/orders/' + order['id'])","    if s['otp']:","        print('OTP:', s['otp']); break","    if s['refunded']:","        raise SystemExit('Order ' + s['status'])"];
+var PH=["<?php","$base = '"+BASE+"';","$key = getenv('DTZ_KEY');","","function api($method, $path, $body = null) {","    global $base, $key;","    $h = ['X-API-Key: ' . $key, 'Content-Type: application/json'];","    if ($method === 'POST') $h[] = 'Idempotency-Key: ' . bin2hex(random_bytes(16));","    $ch = curl_init($base . $path);","    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method,","        CURLOPT_HTTPHEADER => $h, CURLOPT_TIMEOUT => 30]);","    if ($body) curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));","    $j = json_decode(curl_exec($ch), true);","    if (empty($j['ok'])) throw new Exception($j['error']['code'] . ': ' . $j['error']['message']);","    return $j['data'];","}","","$svc = api('GET', '/services?server=1&country=ID')['services'][0];","$order = api('POST', '/orders', ['server' => '1', 'country' => 'ID',","    'service' => $svc['id'], 'provider' => $svc['provider'] ?? null]);","echo 'Nomor: ' . $order['number'] . PHP_EOL;","do {","    sleep(5);","    $s = api('GET', '/orders/' . $order['id']);","} while (!$s['otp'] && !$s['refunded']);","echo 'OTP: ' . ($s['otp'] ?? 'tidak masuk, saldo dikembalikan') . PHP_EOL;"];
+[['js',JS],['py',PY],['php',PH]].forEach(function(x){var p=$(x[0]);p.querySelector('code').textContent=x[1].join('\n');var b=document.createElement('button');b.className='cp';b.type='button';b.textContent='Salin';p.insertBefore(b,p.firstChild)});
 })();
 </script>
 </body>
