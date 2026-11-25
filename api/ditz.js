@@ -30,9 +30,49 @@ async function ditz(path, params) {
   return d;
 }
 
-const feedPush = async (k, u, x) => { try { await R('LPUSH', 'feed', JSON.stringify({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, u: mask(u), x, t: Date.now() })); await R('LTRIM', 'feed', 0, 49); } catch (e) { /* feed tidak boleh menggagalkan order */ } };
+const feedPush = async (k, u, x) => { try { await R('LPUSH', 'feed', JSON.stringify({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, u: mask(u), x, t: Date.now() })); await R('LTRIM', 'feed', 0, 49); } catch (e) { /* feed tidak boleh menggagalkan order */ } await tgNotify(k, u, x); };
 const bal = async (u) => Number(await R('GET', 'bal:' + u)) || 0;
 const credit = (u, n) => R('INCRBY', 'bal:' + u, Math.round(n));
+
+/* ---- Log ke channel Telegram: user baru, order menunggu OTP, order berhasil, deposit dibuat, deposit berhasil ----
+   Env Vercel: TG_BOT_TOKEN (token bot), TG_LOG_CHAT (id channel -100xxxxxxxxxx atau @namachannel), WEB_URL (alamat webmu).
+   Bot harus jadi admin channel. Kode OTP TIDAK dikirim ke channel. Kalau env kosong, log dilewati. */
+const TG_TOKEN = () => process.env.TG_BOT_TOKEN || '9228073027:AAHoSvSdFnvTN85YkJl1Y5aFeqECkW6bWhc';
+const TG_LOG = () => process.env.TG_LOG_CHAT || '@Informationordernokos';
+const WEB_URL = () => process.env.WEB_URL || 'https://store-digitecid.vercel.app';
+const hesc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const TG_HEAD = {
+  join: '👤 User baru di web',
+  order: '⏳ Order menunggu OTP',
+  otp: '✅ Order berhasil (OTP masuk)',
+  cancel: '↩️ Order dibatalkan',
+  depcreate: '🧾 Deposit dibuat',
+  deposit: '💰 Deposit berhasil'
+};
+async function tgNotify(k, u, x) {
+  try {
+    if (!TG_TOKEN() || !TG_LOG() || !TG_HEAD[k]) return;
+    let name = u;
+    try { const o = JSON.parse(await R('HGET', 'pidx', u)); if (o && o.u) name = o.u; } catch (e) { /* pakai id akun */ }
+    const waktu = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    const text =
+      '<b>' + TG_HEAD[k] + '</b>\n\n' +
+      'Username: <code>' + hesc(name) + '</code>\n' +
+      (x ? 'Detail: ' + hesc(x) + '\n' : '') +
+      'Saldo: Rp ' + (await bal(u)).toLocaleString('id-ID') + '\n' +
+      'Waktu: ' + waktu + ' WIB\n\n' +
+      '⚠️ <i>Jangan dibuka di Telegram. Buka lewat Chrome / Google.</i>' +
+      (WEB_URL() ? '\nLink: <code>' + hesc(WEB_URL()) + '</code>' : '');
+    const body = { chat_id: TG_LOG(), text, parse_mode: 'HTML', disable_web_page_preview: true };
+    if (WEB_URL()) body.reply_markup = { inline_keyboard: [[{ text: '🌐 Buka Web', url: WEB_URL() }]] };
+    await fetch('https://api.telegram.org/bot' + TG_TOKEN() + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(2500)
+    });
+  } catch (e) { /* log Telegram tidak boleh menggagalkan transaksi */ }
+}
 
 /* ---- Pembayaran: buang link penyedia, buat QR di server ---- */
 const HIDE = ['snap_token', 'payment_url', 'redirect_url', 'token'];
@@ -611,6 +651,7 @@ module.exports = async (req, res) => {
         await R('LPUSH', 'deps:' + u, d.id); await R('LTRIM', 'deps:' + u, 0, 19);
         const out = await inlineQr(d);
         if (isUrl(d.pay_url)) await R('SET', 'pay:' + d.id, d.pay_url, 'EX', 2592000);   // disimpan di server, tidak dikirim ke browser
+        await tgNotify('depcreate', u, 'Nominal Rp ' + nominal.toLocaleString('id-ID'));
         return send(200, clean(out));
       }
       case 'deposit_status': {
@@ -737,6 +778,8 @@ module.exports = async (req, res) => {
         try { old = JSON.parse(await R('HGET', 'prof', u)) || {}; } catch (e) { /* belum ada */ }
         await R('HSET', 'prof', u, JSON.stringify({ u: un, p: ph, e: em, s: old.s || Date.now() }));
         await R('HSET', 'pidx', u, JSON.stringify({ u: un, e: em, s: old.s || Date.now() }));
+        // profil pertama kali dibuat = user baru; jl:<user> memastikan log hanya terkirim sekali
+        if (!old.s && (await R('SETNX', 'jl:' + u, '1')) === 1) await tgNotify('join', u, '');
         return send(200, { ok: true });
       }
       case 'profile_list': {   // daftar semua akun untuk chat private: tanpa email, tanpa foto (foto diambil lewat 'profiles')
