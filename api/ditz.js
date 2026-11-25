@@ -4,6 +4,10 @@ const KEY = () => 'ae4674b4b4b9d22a91d8c2615a976ceb';
 const MARKUP = () => Number(process.env.DITZ_MARKUP || 0);
 const RURL = () => 'https://striking-macaque-209704.upstash.io';
 const RTOK = () => 'gQAAAAAAAzMoAAIgcDIzOWE4YzMwMzhmMWQ0MDczOTJmZjdkYWJhMGZkMjFhNA';
+/* ---- Konfigurasi log channel Telegram (isi langsung di sini, tanpa .env). Dikosongkan = log dimatikan ---- */
+const TG_TOKEN = () => '9228073027:AAHoSvSdFnvTN85YkJl1Y5aFeqECkW6bWhc';   // token bot dari @BotFather, contoh '123456:ABC-DEF...'
+const TG_LOG = () => '@Informationordernokos';     // id channel '-100xxxxxxxxxx' atau '@namachannel' (bot harus admin channel)
+const WEB_URL = () => 'https://store-digitecid.vercel.app';    // alamat webmu, contoh 'https://namaweb.vercel.app'
 const READ = new Set(['countries', 'services', 'operators', 'otpwa-services', 'shopee-countries', 'tg-countries']);
 const REFUND = new Set(['canceled', 'cancelled', 'expired', 'failed', 'refunded', 'timeout', 'batal', 'kadaluarsa']);
 const kEmail = (e) => String(e || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -30,47 +34,64 @@ async function ditz(path, params) {
   return d;
 }
 
-const feedPush = async (k, u, x) => { try { await R('LPUSH', 'feed', JSON.stringify({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, u: mask(u), x, t: Date.now() })); await R('LTRIM', 'feed', 0, 49); } catch (e) { /* feed tidak boleh menggagalkan order */ } await tgNotify(k, u, x); };
+const feedPush = async (k, u, x, m) => { try { await R('LPUSH', 'feed', JSON.stringify({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, u: mask(u), x, t: Date.now() })); await R('LTRIM', 'feed', 0, 49); } catch (e) { /* feed tidak boleh menggagalkan order */ } await tgNotify(k, u, x, m); };
 const bal = async (u) => Number(await R('GET', 'bal:' + u)) || 0;
 const credit = (u, n) => R('INCRBY', 'bal:' + u, Math.round(n));
 
 /* ---- Log ke channel Telegram: user baru, order menunggu OTP, order berhasil, deposit dibuat, deposit berhasil ----
-   Env Vercel: TG_BOT_TOKEN (token bot), TG_LOG_CHAT (id channel -100xxxxxxxxxx atau @namachannel), WEB_URL (alamat webmu).
-   Bot harus jadi admin channel. Kode OTP TIDAK dikirim ke channel. Kalau env kosong, log dilewati. */
-const TG_TOKEN = () => process.env.TG_BOT_TOKEN || '9228073027:AAHoSvSdFnvTN85YkJl1Y5aFeqECkW6bWhc';
-const TG_LOG = () => process.env.TG_LOG_CHAT || '@Informationordernokos';
-const WEB_URL = () => process.env.WEB_URL || 'https://store-digitecid.vercel.app';
+   Token, id channel, dan alamat web diisi di bagian konfigurasi paling atas file ini.
+   Bot harus jadi admin channel. Kode OTP TIDAK dikirim ke channel. Kalau kosong, log dilewati. */
 const hesc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const TG_HEAD = {
-  join: '👤 User baru di web',
-  order: '⏳ Order menunggu OTP',
-  otp: '✅ Order berhasil (OTP masuk)',
-  cancel: '↩️ Order dibatalkan',
-  depcreate: '🧾 Deposit dibuat',
-  deposit: '💰 Deposit berhasil'
+const rp = (n) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+const maskNum = (n) => { const s = String(n || '').replace(/\D/g, ''); return s.length > 8 ? s.slice(0, 5) + '••••' + s.slice(-3) : s; };
+// st = warna tombol Telegram: success (hijau), primary (biru), danger (merah)
+const TG_TPL = {
+  join:      { head: '👤 USER BARU DI WEB',   st: 'success', info: '🎉 Akun baru saja terdaftar' },
+  order:     { head: '⏳ ORDER MENUNGGU OTP', st: 'primary', info: '⏳ Menunggu OTP masuk' },
+  otp:       { head: '✅ ORDER BERHASIL',     st: 'success', info: '✅ OTP sudah masuk (kode tidak ditampilkan)' },
+  cancel:    { head: '↩️ ORDER DIBATALKAN',   st: 'danger',  info: '↩️ Saldo order dikembalikan' },
+  depcreate: { head: '🧾 DEPOSIT DIBUAT',     st: 'primary', info: '⏳ Menunggu pembayaran QRIS' },
+  deposit:   { head: '💰 DEPOSIT BERHASIL',   st: 'success', info: '✅ Saldo sudah masuk ke akun' },
+  depcancel: { head: '🚫 DEPOSIT DIBATALKAN', st: 'danger',  info: '❌ Dibatalkan sebelum dibayar' }
 };
-async function tgNotify(k, u, x) {
+async function tgNotify(k, u, x, m) {
   try {
-    if (!TG_TOKEN() || !TG_LOG() || !TG_HEAD[k]) return;
+    const T = TG_TPL[k];
+    if (!T || !TG_TOKEN() || !TG_LOG()) return;
+    m = m || {};
     let name = u;
     try { const o = JSON.parse(await R('HGET', 'pidx', u)); if (o && o.u) name = o.u; } catch (e) { /* pakai id akun */ }
-    const waktu = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-    const text =
-      '<b>' + TG_HEAD[k] + '</b>\n\n' +
-      'Username: <code>' + hesc(name) + '</code>\n' +
-      (x ? 'Detail: ' + hesc(x) + '\n' : '') +
-      'Saldo: Rp ' + (await bal(u)).toLocaleString('id-ID') + '\n' +
-      'Waktu: ' + waktu + ' WIB\n\n' +
-      '⚠️ <i>Jangan dibuka di Telegram. Buka lewat Chrome / Google.</i>' +
-      (WEB_URL() ? '\nLink: <code>' + hesc(WEB_URL()) + '</code>' : '');
-    const body = { chat_id: TG_LOG(), text, parse_mode: 'HTML', disable_web_page_preview: true };
-    if (WEB_URL()) body.reply_markup = { inline_keyboard: [[{ text: '🌐 Buka Web', url: WEB_URL() }]] };
-    await fetch('https://api.telegram.org/bot' + TG_TOKEN() + '/sendMessage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(2500)
-    });
+    const waktu = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const L = [
+      '<b>' + T.head + '</b>',
+      '<i>' + hesc(m.auto ? '🤖 Batal/gagal di penyedia, saldo dikembalikan otomatis' : T.info) + '</i>',
+      '━━━━━━━━━━━━━━━',
+      '👤 <b>User</b>  <code>' + hesc(name) + '</code>'
+    ];
+    if (m.layanan) L.push('📦 <b>Layanan</b>  ' + hesc(m.layanan));
+    if (m.lokasi) L.push('🌍 <b>Lokasi</b>  ' + hesc(m.lokasi));
+    if (m.nomor) L.push('📞 <b>Nomor</b>  <code>' + hesc(maskNum(m.nomor)) + '</code>');
+    if (m.harga != null) L.push('🏷️ <b>Harga</b>  ' + rp(m.harga));
+    if (m.nominal != null) L.push('💵 <b>Nominal</b>  ' + rp(m.nominal));
+    if (m.diterima != null && Number(m.diterima) !== Number(m.nominal)) L.push('📥 <b>Diterima</b>  ' + rp(m.diterima));
+    if (m.id) L.push('🆔 <b>ID</b>  <code>' + hesc(m.id) + '</code>');
+    if (x && !Object.keys(m).length) L.push('📝 <b>Info</b>  ' + hesc(x));
+    L.push('💰 <b>Saldo user</b>  ' + rp(await bal(u)));
+    L.push('🕒 <b>Waktu</b>  ' + waktu + ' WIB');
+    L.push('━━━━━━━━━━━━━━━');
+    L.push('<blockquote>⚠️ <b>Jangan dibuka di Telegram.</b>\nBuka lewat <b>Chrome / Google</b>.' + (WEB_URL() ? '\n🔗 <code>' + hesc(WEB_URL()) + '</code>' : '') + '</blockquote>');
+    const body = { chat_id: TG_LOG(), text: L.join('\n'), parse_mode: 'HTML', disable_web_page_preview: true };
+    if (WEB_URL()) body.reply_markup = { inline_keyboard: [[
+      { text: '🌐 Buka Web', url: WEB_URL(), style: T.st },
+      { text: '📋 Salin Link', copy_text: { text: WEB_URL() }, style: 'primary' }
+    ]] };
+    const sig = AbortSignal.timeout(3500);
+    const send = (bd) => fetch('https://api.telegram.org/bot' + TG_TOKEN() + '/sendMessage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bd), signal: sig });
+    const r = await send(body);
+    if (!r.ok && body.reply_markup) {   // cadangan: kalau tombol berwarna/salin ditolak, kirim ulang dengan tombol polos
+      body.reply_markup = { inline_keyboard: [[{ text: '🌐 Buka Web', url: WEB_URL() }]] };
+      await send(body);
+    }
   } catch (e) { /* log Telegram tidak boleh menggagalkan transaksi */ }
 }
 
@@ -247,7 +268,7 @@ async function ownDep(u, id) {
 }
 async function checkDep(u, id) {
   const d = await ditz('deposit/status', { id });
-  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) { await credit(u, d.total_diterima || d.nominal); await feedPush('deposit', u, 'deposit berhasil Rp ' + Number(d.nominal || 0).toLocaleString('id-ID')); await userStat(u, 'dp', d.nominal); }
+  if (d.status === 'berhasil' && (await R('SETNX', 'cred:' + id, '1')) === 1) { await credit(u, d.total_diterima || d.nominal); await feedPush('deposit', u, 'deposit berhasil Rp ' + Number(d.nominal || 0).toLocaleString('id-ID'), { id, nominal: d.nominal, diterima: d.total_diterima }); await userStat(u, 'dp', d.nominal); }
   return d;
 }
 
@@ -283,7 +304,7 @@ async function cronRefund() {
         if (REFUND.has(String(d.status).toLowerCase())) {
           if ((await R('SETNX', 'ref:' + id, '1')) === 1) {
             await credit(rec.u, rec.price); refunded++;
-            await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis');
+            await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis', { id, harga: rec.price, auto: true });
           }
           await R('SREM', 'pend', id); cleaned++;
         }
@@ -402,7 +423,7 @@ function makeExt(h) {
     await R('SET', 'xo:' + id, JSON.stringify({ u, price: q.price, kind, name: q.name, at: Date.now() }), 'EX', 2592000);
     await R('LPUSH', 'xords:' + u, id); await R('LTRIM', 'xords:' + u, 0, 29);
     if (kind !== 'sp') await R('SADD', 'xpend', id);
-    await feedPush('order', u, 'order ' + KINDS[kind] + ' Rp ' + q.price.toLocaleString('id-ID'));
+    await feedPush('order', u, 'order ' + KINDS[kind] + ' Rp ' + q.price.toLocaleString('id-ID'), { id, layanan: q.name, harga: q.price });
     return { ...scrub(d), id, kind, name: q.name, price_sell: q.price, balance: await bal(u) };
   }
 
@@ -427,7 +448,7 @@ function makeExt(h) {
     if (v.code && rec.kind !== 'sp') await R('SET', 'otpg:' + id, '1', 'EX', 2592000);
     else if (rec.kind !== 'sp' && REFUND.has(v.status)) { refunded = await refundOnce(rec.u, id, rec.price); await R('SREM', 'xpend', id); }
     if (v.code && rec.kind !== 'sp') {
-      if ((await R('SETNX', 'otpf:' + id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
+      if ((await R('SETNX', 'otpf:' + id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai', { id, layanan: rec.name, harga: rec.price });
       await R('SREM', 'xpend', id);
     }
     return { ...v, refunded: refunded || !!(await R('GET', 'ref:' + id)), balance: await bal(u) };
@@ -464,7 +485,7 @@ function makeExt(h) {
     } else await ditz('cancel', { id });
     const refunded = await refundOnce(rec.u, id, rec.price);
     await R('SREM', 'xpend', id);
-    await feedPush('cancel', u, 'order dibatalkan, saldo kembali');
+    await feedPush('cancel', u, 'order dibatalkan, saldo kembali', { id, layanan: rec.name, harga: rec.price });
     return { id, kind: rec.kind, status: 'canceled', refunded, balance: await bal(u) };
   }
 
@@ -527,7 +548,7 @@ function makeExt(h) {
         }
         if (c) { await R('SET', 'otpg:' + id, '1', 'EX', 2592000); await R('SREM', 'xpend', id); continue; }   // FIX: cek OTP dulu sebelum refund
         if (REFUND.has(st)) {
-          if (await refundOnce(rec.u, id, rec.price)) { refunded++; await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis'); }
+          if (await refundOnce(rec.u, id, rec.price)) { refunded++; await feedPush('cancel', rec.u, 'order batal/gagal, saldo dikembalikan otomatis', { id, harga: rec.price, auto: true }); }
           await R('SREM', 'xpend', id);
         }
       } catch (e) { /* dicek lagi di jadwal berikutnya */ }
@@ -622,7 +643,7 @@ module.exports = async (req, res) => {
         await R('SET', 'ord:' + d.id, JSON.stringify({ u, price }), 'EX', 604800);
         await R('LPUSH', 'ords:' + u, d.id); await R('LTRIM', 'ords:' + u, 0, 9); await R('SADD', 'pend', d.id);
         await userStat(u, 'o', price);
-        await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'));
+        await feedPush('order', u, 'order dibuat server ' + o.server + ' ' + o.country + '/' + o.produk + ' Rp ' + price.toLocaleString('id-ID'), { id: d.id, layanan: o.produk, lokasi: 'Server ' + o.server + ' · ' + o.country, harga: price, nomor: d.number });
         return send(200, { ...d, price_sell: price, balance: await bal(u) });
       }
       case 'status': {
@@ -630,7 +651,7 @@ module.exports = async (req, res) => {
         const d = await ditz('status', { id: b.id });
         if (hasOtp(d)) await markOtp(b.id);   // FIX: OTP masuk = order selesai, tidak boleh direfund lagi
         else if (REFUND.has(String(d.status).toLowerCase())) await refundOnce(u, b.id, rec.price);
-        if (hasOtp(d) && (await R('SETNX', 'otpf:' + b.id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai');
+        if (hasOtp(d) && (await R('SETNX', 'otpf:' + b.id, '1')) === 1) await feedPush('otp', u, 'OTP masuk, order selesai', { id: b.id, harga: rec.price });
         return send(200, { ...d, balance: await bal(u) });
       }
       case 'cancel': {
@@ -640,7 +661,7 @@ module.exports = async (req, res) => {
         if (hasOtp(cur)) { await markOtp(b.id); throw new HttpErr(409, 'OTP sudah masuk, order tidak bisa dibatalkan'); }
         const d = await ditz('cancel', { id: b.id });
         await refundOnce(u, b.id, rec.price);
-        await feedPush('cancel', u, 'order dibatalkan, saldo kembali');
+        await feedPush('cancel', u, 'order dibatalkan, saldo kembali', { id: b.id, harga: rec.price });
         return send(200, { ...d, balance: await bal(u) });
       }
       case 'deposit_create': {
@@ -651,7 +672,7 @@ module.exports = async (req, res) => {
         await R('LPUSH', 'deps:' + u, d.id); await R('LTRIM', 'deps:' + u, 0, 19);
         const out = await inlineQr(d);
         if (isUrl(d.pay_url)) await R('SET', 'pay:' + d.id, d.pay_url, 'EX', 2592000);   // disimpan di server, tidak dikirim ke browser
-        await tgNotify('depcreate', u, 'Nominal Rp ' + nominal.toLocaleString('id-ID'));
+        await tgNotify('depcreate', u, '', { id: d.id, nominal });
         return send(200, clean(out));
       }
       case 'deposit_status': {
@@ -673,6 +694,7 @@ module.exports = async (req, res) => {
       case 'deposit_cancel': {
         await ownDep(u, b.id);
         const d = await ditz('deposit/cancel', { id: b.id });
+        if ((await R('SETNX', 'depc:' + b.id, '1')) === 1) await tgNotify('depcancel', u, '', { id: b.id, nominal: d && d.nominal });
         return send(200, clean(d));
       }
       case 'deposit_history': {
